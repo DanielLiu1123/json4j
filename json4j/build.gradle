@@ -4,6 +4,12 @@ dependencies {
     api("org.springframework.boot:spring-boot-starter:${springBootVersion}")
 
     optional("org.springframework.boot:spring-boot-starter-web:${springBootVersion}")
+
+    testImplementation("org.junit.jupiter:junit-jupiter")
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ["--enable-preview"]
 }
 
 apply from: "${rootDir}/gradle/deploy.gradle"
