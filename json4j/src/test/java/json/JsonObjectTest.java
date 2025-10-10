@@ -1,9 +1,8 @@
 package json;
 
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Test;
 
 /**
  *
@@ -14,16 +13,17 @@ import java.util.Map;
 class JsonObjectTest {
 
     @Test
-    void ok(){
-        JsonObject jsonObject = new JsonObject(Map.of(
-                "null", new JsonNull(),
-                "number", new JsonNumber(100),
-                "string", new JsonString("OK"),
-                "object", new JsonObject(Map.of()),
-                "boolean", new JsonBoolean(true),
-                "array", new JsonArray(List.of(new JsonNumber(1), new JsonNull(), new JsonString("Cool")))
-        ));
+    void ok() {
+        Json.JsonObject jsonObject = new Json.JsonObject(Map.of(
+                "null", new Json.JsonNull(),
+                "number", new Json.JsonNumber(100),
+                "string", new Json.JsonString("OK"),
+                "object", new Json.JsonObject(Map.of()),
+                "boolean", new Json.JsonBoolean(true),
+                "array",
+                        new Json.JsonArray(
+                                List.of(new Json.JsonNumber(1), new Json.JsonNull(), new Json.JsonString("Cool")))));
 
-        System.out.println(jsonObject.stringify());
+        System.out.println(jsonObject.toString());
     }
 }

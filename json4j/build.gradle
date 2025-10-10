@@ -6,6 +6,8 @@ dependencies {
     optional("org.springframework.boot:spring-boot-starter-web:${springBootVersion}")
 
     testImplementation("org.junit.jupiter:junit-jupiter")
+
+    testImplementation("tools.jackson.core:jackson-databind:+")
 }
 
 tasks.withType(JavaCompile).configureEach {
