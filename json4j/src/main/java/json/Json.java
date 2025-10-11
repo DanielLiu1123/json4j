@@ -538,11 +538,11 @@ public final class Json {
     }
 
     private static boolean isNullLike(Object o) {
-        return isNullLikeType(o == null ? null : o.getClass());
+        return o == null || isNullLikeType(o.getClass());
     }
 
     private static boolean isNullLikeType(Class<?> type) {
-        return type == null;
+        return false;
     }
 
     private static boolean isBooleanLike(Object o) {
@@ -613,11 +613,22 @@ public final class Json {
 
     private static JsonNull toJsonNull(Object o) {
         if (o == null) return new JsonNull();
+        if (isStringLike(o)) {
+            var v = toJsonString(o).value();
+            if (v.equalsIgnoreCase("null")) return new JsonNull();
+            throw new IllegalStateException("Cannot convert string to null: " + o);
+        }
         throw new IllegalStateException("Unsupported null type: " + o.getClass());
     }
 
     private static JsonBoolean toJsonBoolean(Object o) {
         if (o instanceof Boolean b) return new JsonBoolean(b);
+        if (isStringLike(o)) {
+            var v = toJsonString(o).value();
+            if (v.equalsIgnoreCase("true")) return new JsonBoolean(true);
+            if (v.equalsIgnoreCase("false")) return new JsonBoolean(false);
+            throw new IllegalStateException("Cannot convert string to boolean: " + o);
+        }
         throw new IllegalStateException("Unsupported boolean type: " + o.getClass());
     }
 
@@ -625,10 +636,18 @@ public final class Json {
         if (o instanceof Number n) return new JsonNumber(n);
         if (o == byte.class) return new JsonNumber((byte) o);
         if (o == short.class) return new JsonNumber((short) o);
-        if (o == int.class) return new JsonNumber( (int) o);
+        if (o == int.class) return new JsonNumber((int) o);
         if (o == long.class) return new JsonNumber((long) o);
         if (o == float.class) return new JsonNumber((float) o);
         if (o == double.class) return new JsonNumber((double) o);
+        if (isStringLike(o)) {
+            var v = toJsonString(o).value();
+            try {
+                return new JsonNumber(new BigDecimal(v));
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException("Cannot convert string to number: " + o, e);
+            }
+        }
         throw new IllegalStateException("Unsupported number type: " + o.getClass());
     }
 
@@ -729,9 +748,10 @@ public final class Json {
         if (keyType == null) return key;
         Class<?> rawKey = raw(keyType);
         if (rawKey == Object.class) return key;
-        if (isStringLikeType(rawKey)) return fromJsonString(new JsonString(key), keyType);
-        if (isNullLikeType(rawKey)) return fromJsonNull(new JsonNull(), keyType);
-        if (isBooleanLikeType(rawKey)) return 
+        if (isStringLikeType(rawKey)) return fromJsonString(toJsonString(key), keyType);
+        if (isNullLikeType(rawKey)) return fromJsonNull(toJsonNull(key), keyType);
+        if (isBooleanLikeType(rawKey)) return fromJsonBoolean(toJsonBoolean(key), keyType);
+        if (isNumberLikeType(rawKey)) return fromJsonNumber(toJsonNumber(key), keyType);
         return key;
     }
 
