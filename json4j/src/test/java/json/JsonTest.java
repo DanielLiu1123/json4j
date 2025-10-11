@@ -7,16 +7,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import lombok.Data;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -51,56 +50,32 @@ class JsonTest {
                     Arguments.of(Map.of("key", "value"), "{\"key\": \"value\"}"),
                     Arguments.of(new LinkedHashMap<>(Map.of("a", 1, "b", 2)), "{\"a\": 1, \"b\": 2}"),
                     Arguments.of(new RecordPerson("Alice", 30, LocalDate.parse("1993-05-15")), "{\"age\": 30, \"birthDate\": \"1993-05-15\", \"name\": \"Alice\"}"),
-                    Arguments.of(new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\": 25, \"birthDate\": \"1998-10-20\", \"name\": \"Bob\"}")
+                    Arguments.of(new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\": 25, \"birthDate\": \"1998-10-20\", \"name\": \"Bob\"}"),
+                    // timestamp
+                    Arguments.of(Date.from(Instant.parse("2024-03-15T10:15:30Z")), "\"2024-03-15T10:15:30Z\""),
+                    Arguments.of(Instant.parse("2024-03-15T10:15:30Z"), "\"2024-03-15T10:15:30Z\""),
+                    Arguments.of(Timestamp.from(Instant.parse("2024-03-15T10:15:30Z")), "\"2024-03-15T10:15:30Z\""),
+                    // date time with timezone
+                    Arguments.of(LocalDateTime.parse("2024-01-01T09:00:30"), "\"2024-01-01T09:00:30\""),
+                    Arguments.of(OffsetDateTime.parse("2024-01-01T09:00:00+08:00"), "\"2024-01-01T09:00+08:00\""),
+                    Arguments.of(ZonedDateTime.parse("2024-01-01T09:00:00+08:00[Asia/Shanghai]"), "\"2024-01-01T09:00+08:00[Asia/Shanghai]\""),
+                    // special map keys
+                    Arguments.of(Map.of(1, "one"), "{\"1\": \"one\"}"),
+                    Arguments.of(Map.of(true, "yes"), "{\"true\": \"yes\"}"),
+                    Arguments.of(new HashMap<>() {{ put(null, "null"); }}, "{\"null\": \"null\"}"),
+                    Arguments.of(Map.of(3.14, "pi"), "{\"3.14\": \"pi\"}"),
+                    Arguments.of(Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\": \"New Year\"}")
             );
             // @spotless:on
         }
 
         @ParameterizedTest
         @MethodSource("stringifyArgs")
-        void showStringifyOK(Object value, String expectedJson) {
-            // Arrange
-            var input = value;
-
+        void stringify(Object input, String expected) {
             // Act
             var actual = Json.stringify(input);
 
             // Assert
-            var expected = expectedJson;
-            assertThat(actual).isEqualTo(expected);
-        }
-
-        @Test
-        void timestampShouldUseSameFormat() {
-            // Date/Instant/Timestamp use same ISO-8601 format
-            var instant = Instant.parse("2024-03-15T10:15:30Z");
-            var date = Date.from(instant);
-            var timestamp = Timestamp.from(instant);
-
-            var actual = Json.stringify(Map.of(
-                    "date", date,
-                    "instant", instant,
-                    "timestamp", timestamp));
-
-            var expected =
-                    "{\"date\": \"%1$s\", \"instant\": \"%1$s\", \"timestamp\": \"%1s\"}".formatted(instant.toString());
-            assertThat(actual).isEqualTo(expected);
-        }
-
-        @Test
-        void dateTimeWithTimeZone() {
-            // Arrange
-            var zdt = LocalDateTime.parse("2024-01-01T09:00:00").atZone(ZoneId.of("Asia/Shanghai"));
-            var odt = OffsetDateTime.ofInstant(zdt.toInstant(), zdt.getZone());
-
-            // Act
-            var actual = Json.stringify(Map.of(
-                    "zoneDateTime", zdt,
-                    "offsetDateTime", odt));
-
-            // Assert
-            var expected =
-                    "{\"offsetDateTime\": \"2024-01-01T09:00+08:00\", \"zoneDateTime\": \"2024-01-01T09:00+08:00[Asia/Shanghai]\"}";
             assertThat(actual).isEqualTo(expected);
         }
     }
@@ -124,24 +99,30 @@ class JsonTest {
                     Arguments.of("[{\"name\":\"Alice\",\"age\":30},{\"name\":\"Bob\",\"age\":25,\"birthDate\":\"2025-10-10\"}]", new Json.Type<List<RecordPerson>>() {}, List.of(new RecordPerson("Alice", 30, null), new RecordPerson("Bob", 25, LocalDate.parse("2025-10-10")))),
                     Arguments.of("[[1,2],[3,4]]", new Json.Type<List<List<Integer>>>() {}, List.of(List.of(1, 2), List.of(3, 4))),
                     Arguments.of("{\"group1\":[{\"name\":\"Alice\",\"age\":30}],\"group2\":[{\"name\":\"Bob\",\"age\":25}]}", new Json.Type<Map<String, List<RecordPerson>>>() {}, Map.of("group1", List.of(new RecordPerson("Alice", 30, null)), "group2", List.of(new RecordPerson("Bob", 25, null)))),
+                    // timestamp
+                    Arguments.of("\"2024-03-15T10:15:30Z\"", new Json.Type<Date>() {}, Date.from(Instant.parse("2024-03-15T10:15:30Z"))),
+                    Arguments.of("\"2024-03-15T10:15:30Z\"", new Json.Type<Instant>() {}, Instant.parse("2024-03-15T10:15:30Z")),
+                    Arguments.of("\"2024-03-15T10:15:30Z\"", new Json.Type<Timestamp>() {}, Timestamp.from(Instant.parse("2024-03-15T10:15:30Z"))),
+                    // date time with timezone
                     Arguments.of("\"2024-01-01T09:00+08:00\"", new Json.Type<OffsetDateTime>() {}, OffsetDateTime.parse("2024-01-01T09:00+08:00")),
-                    Arguments.of("\"2024-01-01T09:00+08:00[Asia/Shanghai]\"", new Json.Type<ZonedDateTime>() {}, ZonedDateTime.parse("2024-01-01T09:00+08:00[Asia/Shanghai]"))
+                    Arguments.of("\"2024-01-01T09:00+08:00[Asia/Shanghai]\"", new Json.Type<ZonedDateTime>() {}, ZonedDateTime.parse("2024-01-01T09:00+08:00[Asia/Shanghai]")),
+                    // special map keys
+                    Arguments.of("{\"1\":\"one\"}", new Json.Type<Map<Integer, String>>() {}, Map.of(1, "one")),
+                    Arguments.of("{\"true\":\"yes\"}", new Json.Type<Map<Boolean, String>>() {}, Map.of(true, "yes")),
+                    Arguments.of("{\"null\":\"null\"}", new Json.Type<HashMap<Json.JsonNull, String>>() {}, new HashMap<>() {{ put(new Json.JsonNull(), "null"); }}),
+                    Arguments.of("{\"3.14\":\"pi\"}", new Json.Type<Map<Double, String>>() {}, Map.of(3.14, "pi")),
+                    Arguments.of("{\"2024-01-01\":\"New Year\"}", new Json.Type<Map<LocalDate, String>>() {}, Map.of(LocalDate.parse("2024-01-01"), "New Year"))
             );
             // @spotless:on
         }
 
         @ParameterizedTest
         @MethodSource("parseArgs")
-        <T> void shouldParseOK(String jsonInput, Json.Type<T> type, T expectedValue) {
-            // Arrange
-            var json = jsonInput;
-            var typeRef = type;
-
+        void parse(String input, Json.Type<?> type, Object expected) {
             // Act
-            var actual = Json.parse(json, typeRef);
+            var actual = Json.parse(input, type);
 
             // Assert
-            var expected = expectedValue;
             assertThat(actual).isEqualTo(expected);
         }
     }
