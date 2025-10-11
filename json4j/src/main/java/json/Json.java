@@ -143,7 +143,6 @@ public final class Json {
             var typeSubclass = findTypeSubclass(getClass());
             var parameterizedType = (ParameterizedType) typeSubclass.getGenericSuperclass();
             var actualTypeArguments = parameterizedType.getActualTypeArguments();
-            assert actualTypeArguments.length == 1;
             this.type = actualTypeArguments[0];
         }
 
@@ -758,7 +757,7 @@ public final class Json {
             else throw new IllegalStateException("Cannot convert JsonArray to " + type);
         }
         if (raw.isArray()) return arrayFromJson(ja, raw.getComponentType());
-        if (Collection.class.isAssignableFrom(raw)) return collectionFromJson(ja, type, raw);
+        if (Iterable.class.isAssignableFrom(raw)) return collectionFromJson(ja, type, raw);
         throw new IllegalStateException("Unsupported array/collection type: " + type);
     }
 
@@ -772,7 +771,6 @@ public final class Json {
         return arr;
     }
 
-    @SuppressWarnings("unchecked")
     private static Object collectionFromJson(JsonArray ja, java.lang.reflect.Type type, Class<?> raw) {
         Collection<Object> coll = createCollection(raw);
         var elementType = collectionElementType(type);
@@ -782,14 +780,12 @@ public final class Json {
 
     @SuppressWarnings("unchecked")
     private static Collection<Object> createCollection(Class<?> raw) {
-        // Prefer insertion-ordered defaults
         if (raw == List.class || raw == ArrayList.class || raw == Collection.class || raw == Iterable.class)
             return new ArrayList<>();
         if (raw == LinkedList.class) return new LinkedList<>();
         if (raw == Set.class || raw == LinkedHashSet.class) return new LinkedHashSet<>();
         if (raw == HashSet.class) return new HashSet<>();
-        if (raw == Queue.class || raw == Deque.class) return new ArrayDeque<>();
-        if (raw == ArrayDeque.class) return new ArrayDeque<>();
+        if (raw == Queue.class || raw == Deque.class || raw == ArrayDeque.class) return new ArrayDeque<>();
         try {
             return (Collection<Object>) raw.getDeclaredConstructor().newInstance();
         } catch (Exception e) {

@@ -1,15 +1,11 @@
 plugins {
-    id "org.springframework.boot" version "${springBootVersion}" apply false
     id "com.diffplug.spotless" version "${spotlessVersion}" apply false
-    id "com.github.spotbugs" version "${spotbugsVersion}" apply false
     id "org.jreleaser" version "${jReleaserVersion}" apply false
-    id "io.spring.nullability" version "+" apply false
 }
 
 subprojects {
     apply plugin: "java"
     apply plugin: "java-library"
-    apply plugin: "io.spring.nullability"
 
     tasks.withType(JavaCompile).configureEach {
         options.compilerArgs += ["-parameters"]
@@ -32,13 +28,8 @@ subprojects {
     }
 
     dependencies {
-        compileOnly("org.projectlombok:lombok:+")
-        annotationProcessor("org.projectlombok:lombok:+")
         testCompileOnly("org.projectlombok:lombok:+")
         testAnnotationProcessor("org.projectlombok:lombok:+")
-        compileOnly("com.github.spotbugs:spotbugs-annotations:${spotbugsAnnotationsVersion}")
-
-        implementation("org.jspecify:jspecify:+")
 
         testImplementation(platform("org.junit:junit-bom:+"))
         // https://docs.gradle.org/current/userguide/upgrading_version_8.html#test_framework_implementation_dependencies
@@ -67,13 +58,6 @@ subprojects {
                 }
             } as Closure<String>)
         }
-    }
-
-    apply plugin: "com.github.spotbugs"
-    spotbugs {
-        spotbugsTest.enabled = false
-        omitVisitors.addAll "FindReturnRef", "DontReusePublicIdentifiers"
-        excludeFilter = file("${rootDir}/config/spotbugs/exclude.xml")
     }
 }
 
