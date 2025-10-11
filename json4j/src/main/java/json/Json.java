@@ -9,12 +9,14 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -562,10 +564,12 @@ public final class Json {
                 || type == char.class
                 || type == Character.class
                 || type.isEnum()
-                || type == Date.class
+                || Date.class.isAssignableFrom(type)
                 || type == LocalDate.class
                 || type == LocalTime.class
                 || type == LocalDateTime.class
+                || type == ZonedDateTime.class
+                || type == OffsetDateTime.class
                 || type == Instant.class
                 || type == Duration.class;
     }
@@ -604,9 +608,10 @@ public final class Json {
         if (o instanceof Date d) return new JsonString(d.toInstant().toString());
         if (o instanceof LocalDate ld) return new JsonString(ld.toString());
         if (o instanceof LocalTime lt) return new JsonString(lt.toString());
-        if (o instanceof LocalDateTime ldt)
-            return new JsonString(ldt.atZone(ZoneId.systemDefault()).toInstant().toString());
+        if (o instanceof LocalDateTime ldt) return new JsonString(ldt.toString());
         if (o instanceof Instant i) return new JsonString(i.toString());
+        if (o instanceof ZonedDateTime zdt) return new JsonString(zdt.toString());
+        if (o instanceof OffsetDateTime odt) return new JsonString(odt.toString());
         if (o instanceof Duration du) return new JsonString(du.toString());
         throw new IllegalStateException("Unsupported string type: " + o.getClass());
     }
@@ -775,7 +780,10 @@ public final class Json {
             Object[] args = new Object[components.length];
             for (int i = 0; i < components.length; i++) {
                 var c = components[i];
-                args[i] = fromJsonValue(jo.value().get(c.getName()), c.getGenericType());
+                var jv = jo.value().get(c.getName());
+                args[i] = (jv == null)
+                        ? (c.getType().isPrimitive() ? defaultPrimitive(c.getType()) : null)
+                        : fromJsonValue(jv, c.getGenericType());
             }
             var ctor = raw.getDeclaredConstructor(argTypes);
             makeAccessible(ctor, raw);
@@ -893,7 +901,6 @@ public final class Json {
         }
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static Object fromJsonString(JsonString js, java.lang.reflect.Type type) {
         Class<?> raw = raw(type);
         if (JsonValue.class.isAssignableFrom(raw)) {
@@ -908,15 +915,26 @@ public final class Json {
                 throw new IllegalStateException("Cannot convert string to char: " + js.value());
             return js.value().charAt(0);
         }
-        if (raw.isEnum()) return Enum.valueOf((Class<Enum>) raw, js.value());
+        if (raw.isEnum()) return toEnum(raw, js.value());
         if (raw == Date.class) return Date.from(Instant.parse(js.value()));
+        if (raw == Timestamp.class) return Timestamp.from(Instant.parse(js.value()));
         if (raw == LocalDate.class) return LocalDate.parse(js.value());
         if (raw == LocalTime.class) return LocalTime.parse(js.value());
-        if (raw == LocalDateTime.class)
-            return LocalDateTime.ofInstant(Instant.parse(js.value()), ZoneId.systemDefault());
+        if (raw == LocalDateTime.class) return LocalDateTime.parse(js.value());
+        if (raw == ZonedDateTime.class) return ZonedDateTime.parse(js.value());
+        if (raw == OffsetDateTime.class) return OffsetDateTime.parse(js.value());
         if (raw == Instant.class) return Instant.parse(js.value());
         if (raw == Duration.class) return Duration.parse(js.value());
         throw new IllegalStateException("Unsupported string target type: " + type);
+    }
+
+    private static Enum<?> toEnum(Class<?> enumType, String value) {
+        Object[] constants = enumType.getEnumConstants();
+        if (constants == null) throw new IllegalStateException(enumType + " is not an enum type");
+        for (var c : constants) {
+            if (((Enum<?>) c).name().equalsIgnoreCase(value)) return (Enum<?>) c;
+        }
+        throw new IllegalStateException(enumType + " has no enum constant " + value);
     }
 
     private static Object fromJsonNumber(JsonNumber jn, java.lang.reflect.Type type) {
