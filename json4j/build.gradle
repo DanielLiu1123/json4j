@@ -10,8 +10,4 @@ dependencies {
     testImplementation("tools.jackson.core:jackson-databind:+")
 }
 
-tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs += ["--enable-preview"]
-}
-
 apply from: "${rootDir}/gradle/deploy.gradle"

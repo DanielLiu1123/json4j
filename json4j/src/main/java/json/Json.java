@@ -1,8 +1,9 @@
 package json;
 
-import java.beans.IntrospectionException;
 import java.beans.Introspector;
-import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -12,22 +13,28 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
-import lombok.SneakyThrows;
 import org.jspecify.annotations.Nullable;
 
 public final class Json {
-
-    public sealed interface JsonValue permits JsonArray, JsonBoolean, JsonNull, JsonNumber, JsonObject, JsonString {
-        @Override
-        String toString();
-    }
 
     /**
      * Convert any java object to JSON string
@@ -49,12 +56,28 @@ public final class Json {
      */
     @Nullable
     public static <T> T parse(String json, Type<T> type) {
-        var parser = new Parser(new Lexer(json));
-        var jsonValue = parser.parse();
+        var jsonValue = toJsonValue(json);
         return fromJsonValue(jsonValue, type.getType());
     }
 
-    @SneakyThrows
+    /**
+     * Parse JSON string to object.
+     *
+     * @param json JSON string
+     * @param type Target class
+     * @param <T>  Target type
+     * @return Parsed object
+     */
+    @Nullable
+    public static <T> T parse(String json, Class<T> type) {
+        return parse(json, Type.of(type));
+    }
+
+    private static JsonValue toJsonValue(String json) {
+        var parser = new Parser(new Lexer(json));
+        return parser.parse();
+    }
+
     public static JsonValue toJsonValue(@Nullable Object o) {
         if (o instanceof JsonValue jsonValue) {
             return jsonValue;
@@ -113,8 +136,7 @@ public final class Json {
         return new JsonBoolean((Boolean) o);
     }
 
-    private static JsonObject toJsonObject(Object o)
-            throws IllegalAccessException, InvocationTargetException, IntrospectionException {
+    private static JsonObject toJsonObject(Object o) {
         // Json object
         var values = new LinkedHashMap<String, JsonValue>();
         if (o instanceof Map<?, ?> map) {
@@ -123,17 +145,25 @@ public final class Json {
             }
         } else if (o instanceof Record record) {
             for (var e : record.getClass().getRecordComponents()) {
-                var v = e.getAccessor().invoke(record);
-                values.put(e.getName(), toJsonValue(v));
+                try {
+                    var v = e.getAccessor().invoke(record);
+                    values.put(e.getName(), toJsonValue(v));
+                } catch (Exception ex) {
+                    throw new IllegalStateException("Failed to get record component value: " + e.getName(), ex);
+                }
             }
         } else {
-            var beanInfo = Introspector.getBeanInfo(o.getClass());
-            for (var property : beanInfo.getPropertyDescriptors()) {
-                if (Objects.equals(property.getName(), "class")) continue;
-                var readMethod = property.getReadMethod();
-                if (readMethod == null) continue;
-                var v = readMethod.invoke(o);
-                values.put(property.getName(), toJsonValue(v));
+            try {
+                var beanInfo = Introspector.getBeanInfo(o.getClass());
+                for (var property : beanInfo.getPropertyDescriptors()) {
+                    if (Objects.equals(property.getName(), "class")) continue;
+                    var readMethod = property.getReadMethod();
+                    if (readMethod == null) continue;
+                    var v = readMethod.invoke(o);
+                    values.put(property.getName(), toJsonValue(v));
+                }
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to convert object to JSON: " + o.getClass(), e);
             }
         }
         return new JsonObject(values);
@@ -182,6 +212,405 @@ public final class Json {
 
     private static boolean isJsonBoolean(Object obj) {
         return obj instanceof Boolean;
+    }
+
+    @SuppressWarnings("unchecked")
+    @Nullable
+    private static <T> T fromJsonValue(JsonValue jsonValue, java.lang.reflect.Type type) {
+        if (jsonValue instanceof JsonNull jsonNull) {
+            return (T) fromJsonNull(jsonNull, type);
+        }
+        if (jsonValue instanceof JsonObject jsonObject) {
+            return (T) fromJsonObject(jsonObject, type);
+        }
+        if (jsonValue instanceof JsonArray jsonArray) {
+            return (T) fromJsonArray(jsonArray, type);
+        }
+        if (jsonValue instanceof JsonString jsonString) {
+            return (T) fromJsonString(jsonString, type);
+        }
+        if (jsonValue instanceof JsonNumber jsonNumber) {
+            return (T) fromJsonNumber(jsonNumber, type);
+        }
+        if (jsonValue instanceof JsonBoolean jsonBoolean) {
+            return (T) fromJsonBoolean(jsonBoolean, type);
+        }
+        throw new IllegalStateException("Unknown JsonValue type: " + jsonValue.getClass());
+    }
+
+    @Nullable
+    private static Object fromJsonNull(JsonNull jsonNull, java.lang.reflect.Type type) {
+        Class<?> rawType = getRawType(type);
+        if (JsonValue.class.isAssignableFrom(rawType)) {
+            if (rawType == JsonNull.class) {
+                return jsonNull;
+            } else {
+                throw new IllegalStateException("Cannot convert JsonNull to " + type);
+            }
+        }
+        return null;
+    }
+
+    private static Object fromJsonObject(JsonObject jsonObject, java.lang.reflect.Type type) {
+        Class<?> rawType = getRawType(type);
+        if (JsonValue.class.isAssignableFrom(rawType)) {
+            if (rawType == JsonObject.class) {
+                return jsonObject;
+            } else {
+                throw new IllegalStateException("Cannot convert JsonObject to " + type);
+            }
+        }
+        if (rawType == Map.class || rawType == LinkedHashMap.class) {
+            var map = new LinkedHashMap<String, @Nullable Object>();
+            var valueType = getMapValueType(type);
+            for (var en : jsonObject.value.entrySet()) {
+                // TODO(Freeman): handle key type, like Enum, Integer, LocalDate, etc.
+                map.put(en.getKey(), fromJsonValue(en.getValue(), valueType));
+            }
+            return map;
+        }
+        if (rawType == HashMap.class) {
+            var map = new HashMap<String, @Nullable Object>();
+            var valueType = getMapValueType(type);
+            for (var en : jsonObject.value.entrySet()) {
+                // TODO(Freeman): handle key type, like Enum, Integer, LocalDate, etc.
+                map.put(en.getKey(), fromJsonValue(en.getValue(), valueType));
+            }
+            return map;
+        }
+        if (rawType == ConcurrentMap.class || rawType == ConcurrentHashMap.class) {
+            var map = new ConcurrentHashMap<String, Object>();
+            var valueType = getMapValueType(type);
+            for (var en : jsonObject.value.entrySet()) {
+                // TODO(Freeman): handle key type, like Enum, Integer, LocalDate, etc.
+                var e = fromJsonValue(en.getValue(), valueType);
+                if (e == null) throw new IllegalStateException(type + " does not support null values");
+                map.put(en.getKey(), e);
+            }
+            return map;
+        }
+        if (rawType.isRecord()) {
+            var recordComponents = rawType.getRecordComponents();
+            var args = new Object[recordComponents.length];
+            var argTypes = new Class<?>[recordComponents.length];
+            for (int i = 0; i < recordComponents.length; i++) {
+                var component = recordComponents[i];
+                argTypes[i] = component.getType();
+                var jsonValue = jsonObject.value.get(component.getName());
+                args[i] = fromJsonValue(jsonValue, component.getGenericType());
+            }
+            try {
+                Constructor<?> c = rawType.getDeclaredConstructor(argTypes);
+                makeAccessible(c, rawType);
+                return c.newInstance(args);
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to create record instance: " + rawType.getName(), e);
+            }
+        }
+        Object bean;
+        var constructors = rawType.getDeclaredConstructors();
+        Constructor<?> noArgConstructor = null;
+        Constructor<?> candidateConstructor = null;
+        for (var constructor : constructors) {
+            if (constructor.getParameterCount() == 0) {
+                noArgConstructor = constructor;
+                break;
+            }
+        }
+        if (noArgConstructor != null) {
+            makeAccessible(noArgConstructor, rawType);
+            try {
+                bean = noArgConstructor.newInstance();
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                        "Failed to create instance using no-arg constructor: " + noArgConstructor, e);
+            }
+        } else {
+            for (var constructor : constructors) {
+                if (constructor.getParameterCount() == 0) continue;
+                if (candidateConstructor != null) {
+                    throw new IllegalStateException("Multiple non no-arg constructors found for " + rawType.getName());
+                }
+                candidateConstructor = constructor;
+            }
+            if (candidateConstructor == null) {
+                throw new IllegalStateException("No accessible constructor found for " + rawType.getName());
+            }
+            makeAccessible(candidateConstructor, rawType);
+            var parameters = candidateConstructor.getParameters();
+            var args = new Object[parameters.length];
+            for (int i = 0; i < parameters.length; i++) {
+                var parameter = parameters[i];
+                var jsonValue = jsonObject.value.get(parameter.getName());
+                if (jsonValue == null) {
+                    args[i] = parameter.getType().isPrimitive() ? defaultValueForPrimitive(parameter.getType()) : null;
+                } else {
+                    args[i] = fromJsonValue(jsonValue, parameter.getParameterizedType());
+                }
+            }
+            try {
+                bean = candidateConstructor.newInstance(args);
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                        "Failed to create instance using constructor: " + candidateConstructor, e);
+            }
+        }
+        try {
+            var beanInfo = Introspector.getBeanInfo(rawType);
+            for (var property : beanInfo.getPropertyDescriptors()) {
+                if (Objects.equals(property.getName(), "class")) continue;
+                var writeMethod = property.getWriteMethod();
+                if (writeMethod == null) continue;
+                var jsonValue = jsonObject.value.get(property.getName());
+                if (jsonValue == null) continue;
+                var value = fromJsonValue(jsonValue, writeMethod.getGenericParameterTypes()[0]);
+                writeMethod.invoke(bean, value);
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to populate bean properties: " + rawType.getName(), e);
+        }
+        return bean;
+    }
+
+    private static void makeAccessible(Constructor<?> c, Class<?> rawType) {
+        if (!Modifier.isPublic(c.getModifiers()) || !Modifier.isPublic(rawType.getModifiers())) {
+            c.setAccessible(true);
+        }
+    }
+
+    private static Object fromJsonArray(JsonArray jsonArray, java.lang.reflect.Type type) {
+        var rawType = getRawType(type);
+        if (JsonValue.class.isAssignableFrom(rawType)) {
+            if (rawType == JsonArray.class) {
+                return jsonArray;
+            } else {
+                throw new IllegalStateException("Cannot convert JsonArray to " + type);
+            }
+        }
+        if (rawType == List.class
+                || rawType == ArrayList.class
+                || rawType == Collection.class
+                || rawType == Iterable.class) {
+            var list = new ArrayList<>();
+            var elementType = getCollectionElementType(type);
+            for (var jsonValue : jsonArray.value()) {
+                list.add(fromJsonValue(jsonValue, elementType));
+            }
+            return list;
+        }
+        if (rawType == LinkedList.class) {
+            var list = new LinkedList<>();
+            var elementType = getCollectionElementType(type);
+            for (var jsonValue : jsonArray.value()) {
+                list.add(fromJsonValue(jsonValue, elementType));
+            }
+            return list;
+        }
+        if (rawType == Set.class || rawType == LinkedHashSet.class) {
+            var set = new LinkedHashSet<>();
+            var elementType = getCollectionElementType(type);
+            for (var jsonValue : jsonArray.value()) {
+                set.add(fromJsonValue(jsonValue, elementType));
+            }
+            return set;
+        }
+        if (rawType == HashSet.class) {
+            var set = new HashSet<>();
+            var elementType = getCollectionElementType(type);
+            for (var jsonValue : jsonArray.value()) {
+                set.add(fromJsonValue(jsonValue, elementType));
+            }
+            return set;
+        }
+        if (rawType == Queue.class || rawType == ArrayBlockingQueue.class) {
+            var queue = new ArrayBlockingQueue<>(jsonArray.value().size());
+            var elementType = getCollectionElementType(type);
+            for (var jsonValue : jsonArray.value()) {
+                var e = fromJsonValue(jsonValue, elementType);
+                if (e == null) throw new IllegalStateException("Queue does not support null elements");
+                queue.add(e);
+            }
+            return queue;
+        }
+        if (rawType == Deque.class || rawType == ArrayDeque.class) {
+            var deque = new ArrayDeque<>(jsonArray.value().size());
+            var elementType = getCollectionElementType(type);
+            for (var jsonValue : jsonArray.value()) {
+                var e = fromJsonValue(jsonValue, elementType);
+                if (e == null) throw new IllegalStateException("Deque does not support null elements");
+                deque.add(e);
+            }
+            return deque;
+        }
+        if (rawType.isArray()) {
+            var array = (Object[]) Array.newInstance(
+                    rawType.getComponentType(), jsonArray.value().size());
+            var elementType = rawType.getComponentType();
+            for (int i = 0; i < jsonArray.value().size(); i++) {
+                array[i] = fromJsonValue(jsonArray.value().get(i), elementType);
+            }
+            return array;
+        }
+        throw new IllegalStateException("Unsupported array type: " + type);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Object fromJsonString(JsonString jsonString, java.lang.reflect.Type type) {
+        var rawType = getRawType(type);
+        if (JsonValue.class.isAssignableFrom(rawType)) {
+            if (rawType == JsonString.class) {
+                return jsonString;
+            } else {
+                throw new IllegalStateException("Cannot convert JsonString to " + type);
+            }
+        }
+        if (rawType == String.class || rawType == CharSequence.class || rawType == Object.class) {
+            return jsonString.value;
+        }
+        if (rawType == StringBuilder.class) {
+            return new StringBuilder(jsonString.value);
+        }
+        if (rawType == StringBuffer.class) {
+            return new StringBuffer(jsonString.value);
+        }
+        if (rawType == char.class || rawType == Character.class) {
+            if (jsonString.value.length() != 1) {
+                throw new IllegalStateException("Cannot convert string to char: " + jsonString.value);
+            }
+            return jsonString.value.charAt(0);
+        }
+        if (rawType.isEnum()) {
+            return Enum.valueOf((Class<Enum>) rawType, jsonString.value);
+        }
+        if (rawType == Date.class) {
+            return Date.from(Instant.parse(jsonString.value));
+        }
+        if (rawType == LocalDate.class) {
+            return LocalDate.parse(jsonString.value);
+        }
+        if (rawType == LocalTime.class) {
+            return LocalTime.parse(jsonString.value);
+        }
+        if (rawType == LocalDateTime.class) {
+            return LocalDateTime.ofInstant(Instant.parse(jsonString.value), ZoneId.systemDefault());
+        }
+        if (rawType == Instant.class) {
+            return Instant.parse(jsonString.value);
+        }
+        if (rawType == Duration.class) {
+            return Duration.parse(jsonString.value);
+        }
+        throw new IllegalStateException("Unsupported string type: " + type);
+    }
+
+    private static Object fromJsonNumber(JsonNumber jsonNumber, java.lang.reflect.Type type) {
+        var rawType = getRawType(type);
+        if (JsonValue.class.isAssignableFrom(rawType)) {
+            if (rawType == JsonNumber.class) {
+                return jsonNumber;
+            } else {
+                throw new IllegalStateException("Cannot convert JsonNumber to " + type);
+            }
+        }
+        if (rawType == Number.class || rawType == Object.class) {
+            return jsonNumber.value;
+        }
+        if (rawType == int.class || rawType == Integer.class) {
+            return jsonNumber.value.intValue();
+        }
+        if (rawType == long.class || rawType == Long.class) {
+            return jsonNumber.value.longValue();
+        }
+        if (rawType == double.class || rawType == Double.class) {
+            return jsonNumber.value.doubleValue();
+        }
+        if (rawType == float.class || rawType == Float.class) {
+            return jsonNumber.value.floatValue();
+        }
+        if (rawType == short.class || rawType == Short.class) {
+            return jsonNumber.value.shortValue();
+        }
+        if (rawType == byte.class || rawType == Byte.class) {
+            return jsonNumber.value.byteValue();
+        }
+        if (rawType == BigDecimal.class) {
+            return new BigDecimal(jsonNumber.value.toString());
+        }
+        if (rawType == BigInteger.class) {
+            return new BigInteger(jsonNumber.value.toString());
+        }
+        throw new IllegalStateException("Unsupported number type: " + type);
+    }
+
+    private static Object fromJsonBoolean(JsonBoolean jsonBoolean, java.lang.reflect.Type type) {
+        var rawType = getRawType(type);
+        if (JsonValue.class.isAssignableFrom(rawType)) {
+            if (rawType == JsonBoolean.class) {
+                return jsonBoolean;
+            } else {
+                throw new IllegalStateException("Cannot convert JsonBoolean to " + type);
+            }
+        }
+        if (rawType == boolean.class || rawType == Boolean.class || rawType == Object.class) {
+            return jsonBoolean.value();
+        }
+        throw new IllegalStateException("Unsupported boolean type: " + type);
+    }
+
+    private static Class<?> getRawType(java.lang.reflect.Type type) {
+        if (type instanceof Class<?> clazz) {
+            return clazz;
+        }
+        if (type instanceof ParameterizedType parameterizedType) {
+            return (Class<?>) parameterizedType.getRawType();
+        }
+        throw new IllegalStateException("Unsupported type: " + type);
+    }
+
+    private static java.lang.reflect.Type getMapValueType(java.lang.reflect.Type type) {
+        if (type instanceof ParameterizedType parameterizedType) {
+            return parameterizedType.getActualTypeArguments()[1];
+        }
+        return Object.class;
+    }
+
+    private static java.lang.reflect.Type getCollectionElementType(java.lang.reflect.Type type) {
+        if (type instanceof ParameterizedType parameterizedType) {
+            return parameterizedType.getActualTypeArguments()[0];
+        }
+        return Object.class;
+    }
+
+    private static Object defaultValueForPrimitive(Class<?> type) {
+        if (type == boolean.class) return false;
+        if (type == byte.class) return (byte) 0;
+        if (type == short.class) return (short) 0;
+        if (type == int.class) return 0;
+        if (type == long.class) return 0L;
+        if (type == float.class) return 0f;
+        if (type == double.class) return 0d;
+        if (type == char.class) return '\0';
+        throw new IllegalStateException("Unsupported primitive type: " + type);
+    }
+
+    public enum Token {
+        LBRACE, // {
+        RBRACE, // }
+        LBRACKET, // [
+        RBRACKET, // ]
+        COLON, // :
+        COMMA, // ,
+        STRING, // "..."
+        NUMBER, // -?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?
+        TRUE, // true
+        FALSE, // false
+        NULL, // null
+        EOF
+    }
+
+    public sealed interface JsonValue permits JsonArray, JsonBoolean, JsonNull, JsonNumber, JsonObject, JsonString {
+        @Override
+        String toString();
     }
 
     public record JsonArray(List<JsonValue> value) implements JsonValue {
@@ -242,6 +671,25 @@ public final class Json {
             this.type = actualTypeArguments[0];
         }
 
+        private Type(java.lang.reflect.Type type) {
+            this.type = type;
+        }
+
+        public static <T> Type<T> of(Class<T> clazz) {
+            return new Type<>(clazz) {};
+        }
+
+        private static Class<?> findTypeSubclass(Class<?> child) {
+            Class<?> parent = child.getSuperclass();
+            if (Object.class == parent) {
+                throw new IllegalStateException("Expected Json.Type superclass");
+            } else if (Type.class == parent) {
+                return child;
+            } else {
+                return findTypeSubclass(parent);
+            }
+        }
+
         public java.lang.reflect.Type getType() {
             return type;
         }
@@ -262,32 +710,6 @@ public final class Json {
         public String toString() {
             return "Type{" + "type=" + type + '}';
         }
-
-        private static Class<?> findTypeSubclass(Class<?> child) {
-            Class<?> parent = child.getSuperclass();
-            if (Object.class == parent) {
-                throw new IllegalStateException("Expected Json.Type superclass");
-            } else if (Type.class == parent) {
-                return child;
-            } else {
-                return findTypeSubclass(parent);
-            }
-        }
-    }
-
-    public enum Token {
-        LBRACE, // {
-        RBRACE, // }
-        LBRACKET, // [
-        RBRACKET, // ]
-        COLON, // :
-        COMMA, // ,
-        STRING, // "..."
-        NUMBER, // -?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?
-        TRUE, // true
-        FALSE, // false
-        NULL, // null
-        EOF
     }
 
     public static final class Lexer {
@@ -303,6 +725,22 @@ public final class Json {
         public Lexer(String s) {
             this.s = Objects.requireNonNull(s, "json must not be null");
             advance(); // load first token
+        }
+
+        private static int hexVal(char c) {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            return -1;
+        }
+
+        private static String hex4(int x) {
+            String s = Integer.toHexString(x);
+            return "0000".substring(Math.min(4, s.length())) + s;
+        }
+
+        private static boolean isDigit(char c) {
+            return c >= '0' && c <= '9';
         }
 
         Token current() {
@@ -484,18 +922,6 @@ public final class Json {
             return cp;
         }
 
-        private static int hexVal(char c) {
-            if (c >= '0' && c <= '9') return c - '0';
-            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-            return -1;
-        }
-
-        private static String hex4(int x) {
-            String s = Integer.toHexString(x);
-            return "0000".substring(Math.min(4, s.length())) + s;
-        }
-
         private void readKeyword(String kw) {
             for (int k = 0; k < kw.length(); k++) {
                 if (eof() || peek() != kw.charAt(k)) {
@@ -552,184 +978,9 @@ public final class Json {
             return c;
         }
 
-        private static boolean isDigit(char c) {
-            return c >= '0' && c <= '9';
-        }
-
         private void error(String msg) {
             throw new IllegalStateException(msg + " at line " + line + ", col " + col);
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static @Nullable <T> T fromJsonValue(JsonValue jsonValue, java.lang.reflect.Type type) {
-        return switch (jsonValue) {
-            case JsonNull jsonNull -> null;
-            case JsonObject jsonObject -> (T) fromJsonObject(jsonObject, type);
-            case JsonArray jsonArray -> (T) fromJsonArray(jsonArray, type);
-            case JsonString jsonString -> (T) fromJsonString(jsonString, type);
-            case JsonNumber jsonNumber -> (T) fromJsonNumber(jsonNumber, type);
-            case JsonBoolean jsonBoolean -> (T) fromJsonBoolean(jsonBoolean, type);
-        };
-    }
-
-    @SneakyThrows
-    private static Object fromJsonObject(JsonObject jsonObject, java.lang.reflect.Type type) {
-        var rawType = getRawType(type);
-        if (Map.class.isAssignableFrom(rawType)) {
-            var map = new LinkedHashMap<String, Object>();
-            var valueType = getMapValueType(type);
-            for (var en : jsonObject.value.entrySet()) {
-                // TODO(Freeman): handle key type, like Enum, Integer, LocalDate, etc.
-                map.put(en.getKey(), fromJsonValue(en.getValue(), valueType));
-            }
-            return map;
-        }
-        if (rawType.isRecord()) {
-            var recordComponents = rawType.getRecordComponents();
-            var args = new Object[recordComponents.length];
-            var argTypes = new Class<?>[recordComponents.length];
-            for (int i = 0; i < recordComponents.length; i++) {
-                var component = recordComponents[i];
-                argTypes[i] = component.getType();
-                var jsonValue = jsonObject.value.get(component.getName());
-                args[i] = fromJsonValue(jsonValue, component.getGenericType());
-            }
-            return rawType.getConstructor(argTypes).newInstance(args);
-        }
-        var bean = rawType.getConstructor().newInstance();
-        var beanInfo = Introspector.getBeanInfo(rawType);
-        for (var property : beanInfo.getPropertyDescriptors()) {
-            var writeMethod = property.getWriteMethod();
-            if (writeMethod == null) continue;
-            var jsonValue = jsonObject.value.get(property.getName());
-            if (jsonValue == null) continue;
-            var value = fromJsonValue(jsonValue, writeMethod.getGenericParameterTypes()[0]);
-            writeMethod.invoke(bean, value);
-        }
-        return bean;
-    }
-
-    private static Object fromJsonArray(JsonArray jsonArray, java.lang.reflect.Type type) {
-        var rawType = getRawType(type);
-        if (List.class.isAssignableFrom(rawType)) {
-            var list = new ArrayList<>();
-            var elementType = getCollectionElementType(type);
-            for (var jsonValue : jsonArray.value()) {
-                list.add(fromJsonValue(jsonValue, elementType));
-            }
-            return list;
-        }
-        if (rawType.isArray()) {
-            var array = (Object[]) java.lang.reflect.Array.newInstance(
-                    rawType.getComponentType(), jsonArray.value().size());
-            var elementType = rawType.getComponentType();
-            for (int i = 0; i < jsonArray.value().size(); i++) {
-                array[i] = fromJsonValue(jsonArray.value().get(i), elementType);
-            }
-            return array;
-        }
-        throw new IllegalStateException("Unsupported array type: " + type);
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Object fromJsonString(JsonString jsonString, java.lang.reflect.Type type) {
-        var rawType = getRawType(type);
-        if (rawType == String.class) {
-            return jsonString.value;
-        }
-        if (rawType == char.class || rawType == Character.class) {
-            if (jsonString.value.length() != 1) {
-                throw new IllegalStateException("Cannot convert string to char: " + jsonString.value);
-            }
-            return jsonString.value.charAt(0);
-        }
-        if (rawType.isEnum()) {
-            return Enum.valueOf((Class<Enum>) rawType, jsonString.value);
-        }
-        if (rawType == Date.class) {
-            return Date.from(Instant.parse(jsonString.value));
-        }
-        if (rawType == LocalDate.class) {
-            return LocalDate.parse(jsonString.value);
-        }
-        if (rawType == LocalTime.class) {
-            return LocalTime.parse(jsonString.value);
-        }
-        if (rawType == LocalDateTime.class) {
-            return LocalDateTime.ofInstant(Instant.parse(jsonString.value), ZoneId.systemDefault());
-        }
-        if (rawType == Instant.class) {
-            return Instant.parse(jsonString.value);
-        }
-        if (rawType == Duration.class) {
-            return Duration.parse(jsonString.value);
-        }
-        throw new IllegalStateException("Unsupported string type: " + type);
-    }
-
-    private static Object fromJsonNumber(JsonNumber jsonNumber, java.lang.reflect.Type type) {
-        var rawType = getRawType(type);
-        if (rawType == Number.class) {
-            return jsonNumber.value;
-        }
-        if (rawType == int.class || rawType == Integer.class) {
-            return jsonNumber.value.intValue();
-        }
-        if (rawType == long.class || rawType == Long.class) {
-            return jsonNumber.value.longValue();
-        }
-        if (rawType == double.class || rawType == Double.class) {
-            return jsonNumber.value.doubleValue();
-        }
-        if (rawType == float.class || rawType == Float.class) {
-            return jsonNumber.value.floatValue();
-        }
-        if (rawType == short.class || rawType == Short.class) {
-            return jsonNumber.value.shortValue();
-        }
-        if (rawType == byte.class || rawType == Byte.class) {
-            return jsonNumber.value.byteValue();
-        }
-        if (rawType == BigDecimal.class) {
-            return new BigDecimal(jsonNumber.value.toString());
-        }
-        if (rawType == BigInteger.class) {
-            return new BigInteger(jsonNumber.value.toString());
-        }
-        throw new IllegalStateException("Unsupported number type: " + type);
-    }
-
-    private static Object fromJsonBoolean(JsonBoolean jsonBoolean, java.lang.reflect.Type type) {
-        var rawType = getRawType(type);
-        if (rawType == boolean.class || rawType == Boolean.class) {
-            return jsonBoolean.value();
-        }
-        throw new IllegalStateException("Unsupported boolean type: " + type);
-    }
-
-    private static Class<?> getRawType(java.lang.reflect.Type type) {
-        if (type instanceof Class<?> clazz) {
-            return clazz;
-        }
-        if (type instanceof ParameterizedType parameterizedType) {
-            return (Class<?>) parameterizedType.getRawType();
-        }
-        throw new IllegalStateException("Unsupported type: " + type);
-    }
-
-    private static java.lang.reflect.Type getMapValueType(java.lang.reflect.Type type) {
-        if (type instanceof ParameterizedType parameterizedType) {
-            return parameterizedType.getActualTypeArguments()[1];
-        }
-        return Object.class;
-    }
-
-    private static java.lang.reflect.Type getCollectionElementType(java.lang.reflect.Type type) {
-        if (type instanceof ParameterizedType parameterizedType) {
-            return parameterizedType.getActualTypeArguments()[0];
-        }
-        return Object.class;
     }
 
     public static final class Parser {

@@ -36,6 +36,7 @@ class JsonTest {
                     return ClassUser.class;
                 }
             }));
+            System.out.println(Json.parse(json, RecordUser.class));
         }
     }
 }
