@@ -65,6 +65,8 @@ public final class Json {
      * @param <T> target type
      */
     public static <T> T parse(String json, Type<T> type) {
+        Objects.requireNonNull(json);
+        Objects.requireNonNull(type);
         var jsonValue = toJsonValue(json);
         return fromJsonValue(jsonValue, type.getType());
     }
@@ -77,6 +79,7 @@ public final class Json {
      * @param <T> target type
      */
     public static <T> T parse(String json, Class<T> type) {
+        Objects.requireNonNull(type);
         return parse(json, Type.of(type));
     }
 
