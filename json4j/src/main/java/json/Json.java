@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -711,13 +712,33 @@ public final class Json {
 
     @SuppressWarnings("unchecked")
     private static <T> T fromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
-        if (jv instanceof JsonNull j) return (T) fromJsonNull(j, type);
-        if (jv instanceof JsonObject jo) return (T) fromJsonObject(jo, type);
-        if (jv instanceof JsonArray ja) return (T) fromJsonArray(ja, type);
-        if (jv instanceof JsonString js) return (T) fromJsonString(js, type);
-        if (jv instanceof JsonNumber jn) return (T) fromJsonNumber(jn, type);
-        if (jv instanceof JsonBoolean jb) return (T) fromJsonBoolean(jb, type);
-        throw new IllegalStateException("Unknown JsonValue: " + jv.getClass());
+        Class<?> raw = raw(type);
+        if (raw == Object.class) return (T) fromJsonUntyped(jv);
+        if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jv, raw, type);
+        // null
+        if (jv instanceof JsonNull || isNullLikeType(raw)) return (T) nullFromJsonValue(jv, type); // careful!
+        // boolean
+        if (isBooleanLikeType(raw)) return (T) booleanFromJsonValue(jv, type);
+        // number
+        if (isNumberLikeType(raw)) return (T) numberFromJsonValue(jv, type);
+        // string
+        if (isStringLikeType(raw)) return (T) stringFromJsonValue(jv, type);
+        // array
+        if (raw.isArray()) {
+            return (T) arrayFromJson(expectJsonArray(jv, type), raw.getComponentType());
+        }
+        if (Iterable.class.isAssignableFrom(raw)) {
+            return (T) collectionFromJson(expectJsonArray(jv, type), type, raw);
+        }
+        // object
+        var jo = expectJsonObject(jv, type);
+        if (Map.class.isAssignableFrom(raw)) {
+            return (T) mapFromJson(jo, type, raw);
+        }
+        if (raw.isRecord()) {
+            return (T) recordFromJson(jo, raw);
+        }
+        return (T) fromJsonObject(jo, type);
     }
 
     private static Object fromJsonNull(JsonNull jsonNull, java.lang.reflect.Type type) {
@@ -754,12 +775,12 @@ public final class Json {
 
     private static Object mapKeyFromString(String key, java.lang.reflect.Type keyType) {
         if (keyType == null) return key;
-        Class<?> rawKey = raw(keyType);
-        if (rawKey == Object.class) return key;
-        if (isStringLikeType(rawKey)) return fromJsonString(toJsonString(key), keyType);
-        if (isNullLikeType(rawKey)) return fromJsonNull(toJsonNull(key), keyType);
-        if (isBooleanLikeType(rawKey)) return fromJsonBoolean(toJsonBoolean(key), keyType);
-        if (isNumberLikeType(rawKey)) return fromJsonNumber(toJsonNumber(key), keyType);
+        Class<?> raw = raw(keyType);
+        if (raw == Object.class) return key;
+        if (isStringLikeType(raw)) return stringFromJsonValue(toJsonString(key), keyType);
+        if (isNullLikeType(raw)) return nullFromJsonValue(toJsonNull(key), keyType);
+        if (isBooleanLikeType(raw)) return booleanFromJsonValue(toJsonBoolean(key), keyType);
+        if (isNumberLikeType(raw)) return numberFromJsonValue(toJsonNumber(key), keyType);
         return key;
     }
 
@@ -887,6 +908,208 @@ public final class Json {
         var elementType = collectionElementType(type);
         for (var jv : ja.value()) coll.add(fromJsonValue(jv, elementType));
         return coll;
+    }
+
+    private static JsonArray expectJsonArray(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonArray ja) return ja;
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static JsonObject expectJsonObject(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonObject jo) return jo;
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static Object asJsonValue(JsonValue jv, Class<?> raw, java.lang.reflect.Type type) {
+        if (raw.isInstance(jv)) return jv;
+        if (raw == JsonValue.class) return jv;
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static Object fromJsonUntyped(JsonValue jv) {
+        if (jv instanceof JsonNull) return null;
+        if (jv instanceof JsonString js) return js.value();
+        if (jv instanceof JsonNumber jn) return jn.value();
+        if (jv instanceof JsonBoolean jb) return jb.value();
+        if (jv instanceof JsonArray ja) {
+            List<Object> list = new ArrayList<>(ja.value().size());
+            for (var elem : ja.value()) list.add(fromJsonValue(elem, Object.class));
+            return list;
+        }
+        if (jv instanceof JsonObject jo) {
+            Map<String, Object> map = new LinkedHashMap<>();
+            for (var en : jo.value().entrySet()) map.put(en.getKey(), fromJsonValue(en.getValue(), Object.class));
+            return map;
+        }
+        throw new IllegalStateException("Unknown JsonValue: " + jv.getClass());
+    }
+
+    private static Object nullFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonNull jn) return fromJsonNull(jn, type);
+        if (jv instanceof JsonString js) {
+            String value = js.value();
+            if (value.equalsIgnoreCase("null")) return fromJsonNull(new JsonNull(), type);
+            else throw new IllegalStateException("Cannot convert string to null: " + value);
+        }
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static Object booleanFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonBoolean jb) return fromJsonBoolean(jb, type);
+        if (jv instanceof JsonString js) {
+            String value = js.value();
+            if (value.equalsIgnoreCase("true")) return fromJsonBoolean(new JsonBoolean(true), type);
+            if (value.equalsIgnoreCase("false")) return fromJsonBoolean(new JsonBoolean(false), type);
+            else throw new IllegalStateException("Cannot convert string to boolean: " + value);
+        }
+        if (jv instanceof JsonNumber jn) {
+            int v = jn.value().intValue();
+            if (v == 0) return fromJsonBoolean(new JsonBoolean(false), type);
+            if (v == 1) return fromJsonBoolean(new JsonBoolean(true), type);
+            throw new IllegalStateException("Cannot convert number to boolean: " + jn.value());
+        }
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static Object numberFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonNumber jn) return fromJsonNumber(jn, type);
+        if (jv instanceof JsonString js) {
+            try {
+                return fromJsonNumber(new JsonNumber(new BigDecimal(js.value())), type);
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException("Cannot convert string to number: " + js.value(), e);
+            }
+        }
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static Object stringFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        Class<?> raw = raw(type);
+        if (raw == char.class || raw == Character.class) {
+            var s = coerceToString(jv);
+            if (s.length() != 1) throw new IllegalStateException("Cannot convert string to char: " + s);
+            return s.charAt(0);
+        }
+        if (raw == String.class || raw == CharSequence.class) return coerceToString(jv);
+        if (raw == StringBuilder.class) return new StringBuilder(coerceToString(jv));
+        if (raw == StringBuffer.class) return new StringBuffer(coerceToString(jv));
+        if (raw.isEnum()) return enumFromJsonValue(jv, raw);
+        if (raw == Instant.class) return instantFromJsonValue(jv, type);
+        if (raw == Date.class) return Date.from(instantFromJsonValue(jv, type));
+        if (raw == Timestamp.class) return Timestamp.from(instantFromJsonValue(jv, type));
+        if (raw == Duration.class) return durationFromJsonValue(jv, type);
+        if (raw == LocalDateTime.class) return localDateTimeFromJsonValue(jv, type);
+        if (raw == ZonedDateTime.class) return zonedDateTimeFromJsonValue(jv, type);
+        if (raw == OffsetDateTime.class) return offsetDateTimeFromJsonValue(jv, type);
+        if (raw == LocalDate.class) return LocalDate.parse(requireStringValue(jv, type));
+        if (raw == LocalTime.class) return LocalTime.parse(requireStringValue(jv, type));
+        throw new IllegalStateException("Unsupported temporal target type: " + type);
+    }
+
+    private static Object characterFromJsonValue(JsonValue jv) {
+        String value = coerceToString(jv);
+        if (value.length() != 1) throw new IllegalStateException("Cannot convert string to char: " + value);
+        return value.charAt(0);
+    }
+
+    private static Object charSequenceFromJsonValue(JsonValue jv, Class<?> raw, java.lang.reflect.Type type) {
+        String value = coerceToString(jv);
+        if (raw == String.class || raw == CharSequence.class) return value;
+        if (raw == StringBuilder.class) return new StringBuilder(value);
+        if (raw == StringBuffer.class) return new StringBuffer(value);
+        throw new IllegalStateException("Unsupported string target type: " + type);
+    }
+
+    private static Object enumFromJsonValue(JsonValue jv, Class<?> raw) {
+        if (jv instanceof JsonString js) return toEnum(raw, js.value());
+        if (jv instanceof JsonNumber jn) {
+            int ordinal = jn.value().intValue();
+            var constants = raw.getEnumConstants();
+            if (constants == null) throw new IllegalStateException("Not an enum type: " + raw.getName());
+            if (ordinal < 0 || ordinal >= constants.length)
+                throw new IllegalStateException("Enum ordinal out of range for " + raw.getName() + ": " + ordinal);
+            return constants[ordinal];
+        }
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + raw.getName());
+    }
+
+    private static boolean isTemporalType(Class<?> raw) {
+        return raw == Date.class
+                || raw == Timestamp.class
+                || raw == Instant.class
+                || raw == Duration.class
+                || raw == LocalDate.class
+                || raw == LocalTime.class
+                || raw == LocalDateTime.class
+                || raw == ZonedDateTime.class
+                || raw == OffsetDateTime.class;
+    }
+
+    private static Object temporalFromJsonValue(JsonValue jv, Class<?> raw, java.lang.reflect.Type type) {
+        if (raw == Instant.class) return instantFromJsonValue(jv, type);
+        if (raw == Date.class) return Date.from(instantFromJsonValue(jv, type));
+        if (raw == Timestamp.class) return Timestamp.from(instantFromJsonValue(jv, type));
+        if (raw == Duration.class) return durationFromJsonValue(jv, type);
+        // TODO(Freeman): LocalDateTime can be parsed from epoch millis
+        String value = requireStringValue(jv, type);
+        if (raw == LocalDate.class) return LocalDate.parse(value);
+        if (raw == LocalTime.class) return LocalTime.parse(value);
+        if (raw == LocalDateTime.class) return LocalDateTime.parse(value);
+        if (raw == ZonedDateTime.class) return ZonedDateTime.parse(value);
+        if (raw == OffsetDateTime.class) return OffsetDateTime.parse(value);
+        throw new IllegalStateException("Unsupported temporal target type: " + type);
+    }
+
+    private static Instant instantFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonString js) return Instant.parse(js.value());
+        if (jv instanceof JsonNumber jn) return Instant.ofEpochMilli(numberToLong(jn.value(), type));
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static Duration durationFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonString js) return Duration.parse(js.value());
+        if (jv instanceof JsonNumber jn) return Duration.ofMillis(numberToLong(jn.value(), type));
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static LocalDateTime localDateTimeFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonString js) return LocalDateTime.parse(js.value());
+        if (jv instanceof JsonNumber jn)
+            return instantFromJsonValue(jn, type).atZone(ZoneId.systemDefault()).toLocalDateTime();
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static ZonedDateTime zonedDateTimeFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonString js) return ZonedDateTime.parse(js.value());
+        if (jv instanceof JsonNumber jn) return instantFromJsonValue(jn, type).atZone(ZoneId.systemDefault());
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static OffsetDateTime offsetDateTimeFromJsonValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonString js) return OffsetDateTime.parse(js.value());
+        if (jv instanceof JsonNumber jn)
+            return zonedDateTimeFromJsonValue(jn, type).toOffsetDateTime();
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static long numberToLong(Number number, java.lang.reflect.Type type) {
+        if (number instanceof BigDecimal bd) {
+            try {
+                return bd.longValueExact();
+            } catch (ArithmeticException e) {
+                throw new IllegalStateException("Cannot convert decimal to long for " + type + ": " + bd, e);
+            }
+        }
+        return number.longValue();
+    }
+
+    private static String requireStringValue(JsonValue jv, java.lang.reflect.Type type) {
+        if (jv instanceof JsonString js) return js.value();
+        throw new IllegalStateException("Cannot convert " + jv.getClass() + " to " + type);
+    }
+
+    private static String coerceToString(JsonValue jv) {
+        return jv instanceof JsonString js ? js.value() /* no quote */ : jv.toString();
     }
 
     @SuppressWarnings("unchecked")
