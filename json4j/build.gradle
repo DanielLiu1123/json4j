@@ -3,6 +3,9 @@ description = "json4j"
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("tools.jackson.core:jackson-databind:+")
+
+    // add protobuf java
+    optional("com.google.protobuf:protobuf-java:${protobufVersion}")
 }
 
 apply from: "${rootDir}/gradle/deploy.gradle"

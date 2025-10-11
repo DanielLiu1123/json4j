@@ -529,28 +529,72 @@ public final class Json {
 
     private static JsonValue toJsonValue(Object o) {
         if (o instanceof JsonValue jv) return jv;
-        if (o == null) return new JsonNull();
-        if (o instanceof Boolean b) return new JsonBoolean(b);
-        if (o instanceof Number n) return new JsonNumber(n);
+        if (isNullLike(o)) return toJsonNull(o);
+        if (isBooleanLike(o)) return toJsonBoolean(o);
+        if (isNumberLike(o)) return toJsonNumber(o);
         if (isStringLike(o)) return toJsonString(o);
         if (isArrayLike(o)) return toJsonArray(o);
         return toJsonObject(o);
     }
 
-    private static boolean isStringLike(Object obj) {
-        return obj instanceof CharSequence
-                || obj instanceof Character
-                || obj instanceof Enum<?>
-                || obj instanceof Date
-                || obj instanceof LocalDate
-                || obj instanceof LocalTime
-                || obj instanceof LocalDateTime
-                || obj instanceof Instant
-                || obj instanceof Duration;
+    private static boolean isNullLike(Object o) {
+        return isNullLikeType(o == null ? null : o.getClass());
     }
 
-    private static boolean isArrayLike(Object obj) {
-        return obj instanceof Iterable<?> || obj.getClass().isArray();
+    private static boolean isNullLikeType(Class<?> type) {
+        return type == null;
+    }
+
+    private static boolean isBooleanLike(Object o) {
+        return isBooleanLikeType(o.getClass());
+    }
+
+    private static boolean isBooleanLikeType(Class<?> type) {
+        return type == Boolean.class || type == boolean.class;
+    }
+
+    private static boolean isStringLike(Object o) {
+        return isStringLikeType(o.getClass());
+    }
+
+    private static boolean isStringLikeType(Class<?> type) {
+        return CharSequence.class.isAssignableFrom(type)
+                || type == char.class
+                || type == Character.class
+                || type.isEnum()
+                || type == Date.class
+                || type == LocalDate.class
+                || type == LocalTime.class
+                || type == LocalDateTime.class
+                || type == Instant.class
+                || type == Duration.class;
+    }
+
+    private static boolean isNumberLike(Object o) {
+        return isNumberLikeType(o.getClass());
+    }
+
+    private static boolean isNumberLikeType(Class<?> type) {
+        return Number.class.isAssignableFrom(type)
+                || type == byte.class
+                || type == short.class
+                || type == int.class
+                || type == long.class
+                || type == float.class
+                || type == double.class;
+    }
+
+    private static boolean isArrayLike(Object o) {
+        return o.getClass().isArray() || o instanceof Iterable<?>;
+    }
+
+    private static String mapKeyToString(Object key) {
+        if (key == null) return "null";
+        if (isStringLikeType(key.getClass())) return toJsonString(key).value(); // no quotes
+        if (isNullLikeType(key.getClass())) return toJsonNull(key).toString();
+        if (isBooleanLikeType(key.getClass())) return toJsonBoolean(key).toString();
+        if (isNumberLikeType(key.getClass())) return toJsonNumber(key).toString();
+        throw new IllegalStateException("Unsupported map key type: " + key.getClass());
     }
 
     private static JsonString toJsonString(Object o) {
@@ -567,6 +611,27 @@ public final class Json {
         throw new IllegalStateException("Unsupported string type: " + o.getClass());
     }
 
+    private static JsonNull toJsonNull(Object o) {
+        if (o == null) return new JsonNull();
+        throw new IllegalStateException("Unsupported null type: " + o.getClass());
+    }
+
+    private static JsonBoolean toJsonBoolean(Object o) {
+        if (o instanceof Boolean b) return new JsonBoolean(b);
+        throw new IllegalStateException("Unsupported boolean type: " + o.getClass());
+    }
+
+    private static JsonNumber toJsonNumber(Object o) {
+        if (o instanceof Number n) return new JsonNumber(n);
+        if (o == byte.class) return new JsonNumber((byte) o);
+        if (o == short.class) return new JsonNumber((short) o);
+        if (o == int.class) return new JsonNumber( (int) o);
+        if (o == long.class) return new JsonNumber((long) o);
+        if (o == float.class) return new JsonNumber((float) o);
+        if (o == double.class) return new JsonNumber((double) o);
+        throw new IllegalStateException("Unsupported number type: " + o.getClass());
+    }
+
     private static JsonArray toJsonArray(Object o) {
         var values = new ArrayList<JsonValue>();
         if (o instanceof Iterable<?> it) {
@@ -581,7 +646,7 @@ public final class Json {
     private static JsonObject toJsonObject(Object o) {
         var values = new LinkedHashMap<String, JsonValue>();
         if (o instanceof Map<?, ?> map) {
-            for (var en : map.entrySet()) values.put(String.valueOf(en.getKey()), toJsonValue(en.getValue()));
+            for (var en : map.entrySet()) values.put(mapKeyToString(en.getKey()), toJsonValue(en.getValue()));
             return new JsonObject(values);
         }
         if (o instanceof Record r) {
@@ -649,19 +714,34 @@ public final class Json {
     }
 
     private static Object mapFromJson(JsonObject jo, java.lang.reflect.Type type, Class<?> raw) {
+        var keyType = mapKeyType(type);
         var valueType = mapValueType(type);
-        Map<String, Object> map = createMap(raw);
-        for (var en : jo.value().entrySet()) map.put(en.getKey(), fromJsonValue(en.getValue(), valueType));
+        Map<Object, Object> map = createMap(raw);
+        for (var en : jo.value().entrySet()) {
+            Object key = mapKeyFromString(en.getKey(), keyType);
+            Object value = fromJsonValue(en.getValue(), valueType);
+            map.put(key, value);
+        }
         return map;
     }
 
+    private static Object mapKeyFromString(String key, java.lang.reflect.Type keyType) {
+        if (keyType == null) return key;
+        Class<?> rawKey = raw(keyType);
+        if (rawKey == Object.class) return key;
+        if (isStringLikeType(rawKey)) return fromJsonString(new JsonString(key), keyType);
+        if (isNullLikeType(rawKey)) return fromJsonNull(new JsonNull(), keyType);
+        if (isBooleanLikeType(rawKey)) return 
+        return key;
+    }
+
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> createMap(Class<?> raw) {
+    private static Map<Object, Object> createMap(Class<?> raw) {
         if (raw == LinkedHashMap.class || raw == Map.class) return new LinkedHashMap<>();
         if (raw == HashMap.class) return new HashMap<>();
         if (raw == ConcurrentMap.class || raw == ConcurrentHashMap.class) return new ConcurrentHashMap<>();
         try {
-            return (Map<String, Object>) raw.getDeclaredConstructor().newInstance();
+            return (Map<Object, Object>) raw.getDeclaredConstructor().newInstance();
         } catch (Exception e) {
             throw new IllegalStateException("Unsupported Map type: " + raw.getName(), e);
         }
@@ -855,6 +935,11 @@ public final class Json {
             return Array.newInstance(raw(ga.getGenericComponentType()), 0).getClass();
         }
         throw new IllegalStateException("Unsupported type: " + type);
+    }
+
+    private static java.lang.reflect.Type mapKeyType(java.lang.reflect.Type type) {
+        if (type instanceof ParameterizedType p) return p.getActualTypeArguments()[0];
+        return Object.class;
     }
 
     private static java.lang.reflect.Type mapValueType(java.lang.reflect.Type type) {
