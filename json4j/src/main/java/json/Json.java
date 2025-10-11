@@ -187,17 +187,17 @@ public final class Json {
     // ------------------------------------------------------------
 
     public enum Token {
-        LBRACE,
-        RBRACE,
-        LBRACKET,
-        RBRACKET,
-        COLON,
-        COMMA,
-        STRING,
-        NUMBER,
-        TRUE,
-        FALSE,
-        NULL,
+        LBRACE, // {
+        RBRACE, // }
+        LBRACKET, // [
+        RBRACKET, // ]
+        COLON, // :
+        COMMA, // ,
+        STRING, // "..."
+        NUMBER, // 123
+        TRUE, // true
+        FALSE, // false
+        NULL, // null
         EOF
     }
 
