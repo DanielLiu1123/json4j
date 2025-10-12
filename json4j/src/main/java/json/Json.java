@@ -807,7 +807,7 @@ public final class Json {
         if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jv, raw); // return AST as-is
 
         // 1) Null handling
-        if (jv instanceof JsonNull) return (T) nullValueFor(raw); // primitives -> default, otherwise null
+        if (jv instanceof JsonNull) return (T) nullValueFor(raw);
 
         // 2) Scalar targets (LOOSE)
 
@@ -908,6 +908,8 @@ public final class Json {
             var ctor = raw.getDeclaredConstructor(ctorTypes);
             makeAccessible(ctor, raw);
             return ctor.newInstance(args);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalStateException("Record construct failed: " + raw.getName(), e);
         }
@@ -927,6 +929,8 @@ public final class Json {
                 write.invoke(bean, tv);
             }
             return bean;
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalStateException("Bean populate failed: " + raw.getName(), e);
         }
@@ -1084,7 +1088,7 @@ public final class Json {
     }
 
     private static Object nullValueFor(Class<?> raw) {
-        if (raw.isPrimitive()) return defaultValue(raw);
+        if (raw.isPrimitive()) throw new IllegalStateException("Cannot assign null to primitive type " + raw.getName());
         return null;
     }
 

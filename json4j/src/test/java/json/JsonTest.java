@@ -1,6 +1,7 @@
 package json;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -127,8 +128,7 @@ class JsonTest {
                     Arguments.of("\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}),
                     // Loose parsing snake_case to camelCase
                     Arguments.of("{\"name\":\"Alice\",\"birth_date\":\"1993-05-15\"}", new Json.Type<RecordPerson>() {}, new RecordPerson("Alice", 0, LocalDate.parse("1993-05-15"))),
-                    Arguments.of("{\"name\":\"Bob\",\"age\":null,\"birth_date\":\"1998-10-20\"}", new Json.Type<ClassPerson>() {}, new ClassPerson() {{ setName("Bob"); setAge(0); setBirthDate(LocalDate.parse("1998-10-20")); }})
-
+                    Arguments.of("{\"name\":\"Bob\",\"birth_date\":\"1998-10-20\"}", new Json.Type<ClassPerson>() {}, new ClassPerson() {{ setName("Bob"); setBirthDate(LocalDate.parse("1998-10-20")); }})
             );
             // @spotless:on
         }
@@ -141,6 +141,24 @@ class JsonTest {
 
             // Assert
             assertThat(actual).isEqualTo(expected);
+        }
+
+        private static Stream<Arguments> nullCannotParseToPrimitiveArgs() {
+            // @spotless:off
+            return Stream.of(
+                    Arguments.of("null", Json.Type.of(int.class)),
+                    Arguments.of("{\"age\":null,\"birth_date\":\"1998-10-20\"}", new Json.Type<ClassPerson>() {}),
+                    Arguments.of("{\"age\":null,\"birthDate\":\"1998-10-20\"}", new Json.Type<RecordPerson>() {})
+            );
+            // @spotless:on
+        }
+
+        @ParameterizedTest
+        @MethodSource("nullCannotParseToPrimitiveArgs")
+        void nullCannotParseToPrimitive(String input, Json.Type<?> type) {
+            assertThatCode(() -> Json.parse(input, type))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Cannot assign null to primitive");
         }
     }
 }
