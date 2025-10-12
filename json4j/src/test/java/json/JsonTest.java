@@ -2,6 +2,8 @@ package json;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -86,10 +88,12 @@ class JsonTest {
         private static Stream<Arguments> parseArgs() {
             // @spotless:off
             return Stream.of(
-                    Arguments.of("\"json\"", Json.Type.of(String.class), "json"),
+                    Arguments.of("\"str\"", Json.Type.of(String.class), "str"),
                     Arguments.of("7", Json.Type.of(Integer.class), 7),
+                    Arguments.of("7", Json.Type.of(String.class), "7"),
                     Arguments.of("false", Json.Type.of(Boolean.class), false),
                     Arguments.of("null", new Json.Type<RecordPerson>() {}, null),
+                    Arguments.of("null", new Json.Type<String>() {}, null),
                     Arguments.of("[]", new Json.Type<List<RecordPerson>>() {}, List.of()),
                     Arguments.of("{}", new Json.Type<Map<String, RecordPerson>>() {}, Map.of()),
                     Arguments.of("\"2025-10-10\"", new Json.Type<LocalDate>() {}, LocalDate.parse("2025-10-10")),
@@ -99,6 +103,12 @@ class JsonTest {
                     Arguments.of("[{\"name\":\"Alice\",\"age\":30},{\"name\":\"Bob\",\"age\":25,\"birthDate\":\"2025-10-10\"}]", new Json.Type<List<RecordPerson>>() {}, List.of(new RecordPerson("Alice", 30, null), new RecordPerson("Bob", 25, LocalDate.parse("2025-10-10")))),
                     Arguments.of("[[1,2],[3,4]]", new Json.Type<List<List<Integer>>>() {}, List.of(List.of(1, 2), List.of(3, 4))),
                     Arguments.of("{\"group1\":[{\"name\":\"Alice\",\"age\":30}],\"group2\":[{\"name\":\"Bob\",\"age\":25}]}", new Json.Type<Map<String, List<RecordPerson>>>() {}, Map.of("group1", List.of(new RecordPerson("Alice", 30, null)), "group2", List.of(new RecordPerson("Bob", 25, null)))),
+                    // Number parsing
+                    Arguments.of("42", new Json.Type<>() {}, 42),
+                    Arguments.of("10000000000", new Json.Type<>() {}, 10000000000L),
+                    Arguments.of("9999999999999999999999999", new Json.Type<>() {}, new BigInteger("9999999999999999999999999")),
+                    Arguments.of("3.14", new Json.Type<>() {}, 3.14),
+                    Arguments.of("1.0000000000000001", new Json.Type<>() {}, new BigDecimal("1.0000000000000001")),
                     // timestamp
                     Arguments.of("\"2024-03-15T10:15:30Z\"", new Json.Type<Date>() {}, Date.from(Instant.parse("2024-03-15T10:15:30Z"))),
                     Arguments.of("\"2024-03-15T10:15:30Z\"", new Json.Type<Instant>() {}, Instant.parse("2024-03-15T10:15:30Z")),
@@ -109,9 +119,12 @@ class JsonTest {
                     // special map keys
                     Arguments.of("{\"1\":\"one\"}", new Json.Type<Map<Integer, String>>() {}, Map.of(1, "one")),
                     Arguments.of("{\"true\":\"yes\"}", new Json.Type<Map<Boolean, String>>() {}, Map.of(true, "yes")),
-                    Arguments.of("{\"null\":\"null\"}", new Json.Type<HashMap<Json.JsonNull, String>>() {}, new HashMap<>() {{ put(new Json.JsonNull(), "null"); }}),
                     Arguments.of("{\"3.14\":\"pi\"}", new Json.Type<Map<Double, String>>() {}, Map.of(3.14, "pi")),
-                    Arguments.of("{\"2024-01-01\":\"New Year\"}", new Json.Type<Map<LocalDate, String>>() {}, Map.of(LocalDate.parse("2024-01-01"), "New Year"))
+                    Arguments.of("{\"2024-01-01\":\"New Year\"}", new Json.Type<Map<LocalDate, String>>() {}, Map.of(LocalDate.parse("2024-01-01"), "New Year")),
+                    // Loose parsing
+                    Arguments.of("{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))),
+                    Arguments.of("\"123.4\"", new Json.Type<Double>() {}, 123.4),
+                    Arguments.of("\"10000000000\"", new Json.Type<Long>() {}, 10000000000L)
             );
             // @spotless:on
         }

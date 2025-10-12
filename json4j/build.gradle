@@ -3,6 +3,7 @@ description = "json4j"
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.assertj:assertj-core:+")
+    testImplementation("org.mockito:mockito-inline:+")
 }
 
 apply from: "${rootDir}/gradle/deploy.gradle"
