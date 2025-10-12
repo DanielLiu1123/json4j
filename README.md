@@ -11,7 +11,7 @@ implementation 'com.github.danielliu1123:json4j:+'
 
 Use as source file:
 ```shell
-curl -O https://raw.githubusercontent.com/DanielLiu1123/json4j/main/src/main/java/json4j/Json.java
+curl -O https://raw.githubusercontent.com/DanielLiu1123/json4j/refs/heads/main/json4j/src/main/java/json/Json.java
 ```
 
 There are only two APIs:
