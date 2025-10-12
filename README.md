@@ -6,7 +6,7 @@ Minimal, standard-first JSON writer and parser. One single Java file, 1k LoC, no
 
 Use as dependency:
 ```groovy
-implementation 'com.github.danielliu1123:json4j:+'
+implementation("io.github.danielliu1123:json4j:+")
 ```
 
 Use as source file:
