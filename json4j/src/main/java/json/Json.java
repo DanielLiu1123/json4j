@@ -902,7 +902,7 @@ public final class Json {
             Object[] args = new Object[components.length];
             for (int i = 0; i < components.length; i++) {
                 var c = components[i];
-                JsonValue v = jo.value().get(c.getName());
+                JsonValue v = findPropertyValue(jo, c.getName());
                 args[i] = (v == null) ? defaultValue(c.getType()) : fromJsonValue(v, c.getGenericType());
             }
             var ctor = raw.getDeclaredConstructor(ctorTypes);
@@ -921,7 +921,7 @@ public final class Json {
                 if ("class".equals(pd.getName())) continue;
                 var write = pd.getWriteMethod();
                 if (write == null) continue;
-                JsonValue v = jo.value().get(pd.getName());
+                JsonValue v = findPropertyValue(jo, pd.getName());
                 if (v == null) continue;
                 Object tv = fromJsonValue(v, write.getGenericParameterTypes()[0]);
                 write.invoke(bean, tv);
@@ -960,6 +960,66 @@ public final class Json {
 
     private static void makeAccessible(Constructor<?> c, Class<?> raw) {
         if (!Modifier.isPublic(c.getModifiers()) || !Modifier.isPublic(raw.getModifiers())) c.setAccessible(true);
+    }
+
+    private static JsonValue findPropertyValue(JsonObject jo, String propertyName) {
+        var map = jo.value();
+        JsonValue direct = map.get(propertyName);
+        if (direct != null || map.containsKey(propertyName)) return direct;
+
+        String snake = toSnakeCase(propertyName);
+        if (!snake.equals(propertyName)) {
+            JsonValue alt = map.get(snake);
+            if (alt != null || map.containsKey(snake)) return alt;
+        }
+
+        String camel = toCamelCase(propertyName);
+        if (!camel.equals(propertyName)) {
+            JsonValue alt = map.get(camel);
+            if (alt != null || map.containsKey(camel)) return alt;
+        }
+
+        return null;
+    }
+
+    private static String toSnakeCase(String name) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (Character.isUpperCase(c)) {
+                if (i > 0) {
+                    char prev = name.charAt(i - 1);
+                    if (Character.isLowerCase(prev) || Character.isDigit(prev)) {
+                        sb.append('_');
+                    } else if (Character.isUpperCase(prev)
+                            && i + 1 < name.length()
+                            && Character.isLowerCase(name.charAt(i + 1))) {
+                        sb.append('_');
+                    }
+                }
+                sb.append(Character.toLowerCase(c));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String toCamelCase(String name) {
+        StringBuilder sb = new StringBuilder();
+        boolean upperNext = false;
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == '_') {
+                upperNext = true;
+            } else if (upperNext) {
+                sb.append(Character.toUpperCase(c));
+                upperNext = false;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private static Object arrayFromJson(JsonArray ja, Class<?> component) {

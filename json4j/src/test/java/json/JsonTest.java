@@ -124,7 +124,11 @@ class JsonTest {
                     Arguments.of("\"123.4\"", new Json.Type<Double>() {}, 123.4),
                     Arguments.of("\"10000000000\"", new Json.Type<Long>() {}, 10000000000L),
                     Arguments.of("\"2025-01-01\"", new Json.Type<Iterable<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))),
-                    Arguments.of("\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")})
+                    Arguments.of("\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}),
+                    // Loose parsing snake_case to camelCase
+                    Arguments.of("{\"name\":\"Alice\",\"birth_date\":\"1993-05-15\"}", new Json.Type<RecordPerson>() {}, new RecordPerson("Alice", 0, LocalDate.parse("1993-05-15"))),
+                    Arguments.of("{\"name\":\"Bob\",\"age\":null,\"birth_date\":\"1998-10-20\"}", new Json.Type<ClassPerson>() {}, new ClassPerson() {{ setName("Bob"); setAge(0); setBirthDate(LocalDate.parse("1998-10-20")); }})
+
             );
             // @spotless:on
         }
