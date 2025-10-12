@@ -73,11 +73,7 @@ class JsonTest {
         @ParameterizedTest
         @MethodSource("stringifyArgs")
         void stringify(Object input, String expected) {
-            // Act
-            var actual = Json.stringify(input);
-
-            // Assert
-            assertThat(actual).isEqualTo(expected);
+            assertThat(Json.stringify(input)).isEqualTo(expected);
         }
     }
 
@@ -121,8 +117,14 @@ class JsonTest {
                     Arguments.of("{\"3.14\":\"pi\"}", new Json.Type<Map<Double, String>>() {}, Map.of(3.14, "pi")),
                     Arguments.of("{\"2024-01-01\":\"New Year\"}", new Json.Type<Map<LocalDate, String>>() {}, Map.of(LocalDate.parse("2024-01-01"), "New Year")),
                     // Loose parsing
-                    Arguments.of("{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))),
+                    Arguments.of("1", new Json.Type<String>() {}, "1"),
+                    Arguments.of("1", new Json.Type<Boolean>() {}, true),
+                    Arguments.of("0", new Json.Type<Boolean>() {}, false),
+                    Arguments.of("0", new Json.Type<Character>() {}, '0'),
+                    Arguments.of("\"true\"", new Json.Type<Boolean>() {}, true),
+                    Arguments.of("\"false\"", new Json.Type<Boolean>() {}, false),
                     Arguments.of("\"123.4\"", new Json.Type<Double>() {}, 123.4),
+                    Arguments.of("{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))),
                     Arguments.of("\"10000000000\"", new Json.Type<Long>() {}, 10000000000L),
                     Arguments.of("\"2025-01-01\"", new Json.Type<Iterable<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))),
                     Arguments.of("\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}),
@@ -136,11 +138,7 @@ class JsonTest {
         @ParameterizedTest
         @MethodSource("parseArgs")
         void parse(String input, Json.Type<?> type, Object expected) {
-            // Act
-            var actual = Json.parse(input, type);
-
-            // Assert
-            assertThat(actual).isEqualTo(expected);
+            assertThat(Json.parse(input, type)).isEqualTo(expected);
         }
 
         private static Stream<Arguments> nullCannotParseToPrimitiveArgs() {
