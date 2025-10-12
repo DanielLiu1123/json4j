@@ -772,7 +772,6 @@ public final class Json {
                 switch (c) {
                     case '"' -> out.append("\\\"");
                     case '\\' -> out.append("\\\\");
-                    case '/' -> out.append("\\/"); // optional
                     case '\b' -> out.append("\\b");
                     case '\f' -> out.append("\\f");
                     case '\n' -> out.append("\\n");

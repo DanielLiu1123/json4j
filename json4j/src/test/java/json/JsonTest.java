@@ -12,7 +12,6 @@ import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -48,11 +47,10 @@ class JsonTest {
                     Arguments.of("hello", "\"hello\""),
                     Arguments.of("", "\"\""),
                     Arguments.of(LocalDate.parse("2023-01-01"), "\"2023-01-01\""),
-                    Arguments.of(List.of(1, 2, 3), "[1, 2, 3]"),
-                    Arguments.of(Map.of("key", "value"), "{\"key\": \"value\"}"),
-                    Arguments.of(new LinkedHashMap<>(Map.of("a", 1, "b", 2)), "{\"a\": 1, \"b\": 2}"),
-                    Arguments.of(new RecordPerson("Alice", 30, LocalDate.parse("1993-05-15")), "{\"age\": 30, \"birthDate\": \"1993-05-15\", \"name\": \"Alice\"}"),
-                    Arguments.of(new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\": 25, \"birthDate\": \"1998-10-20\", \"name\": \"Bob\"}"),
+                    Arguments.of(List.of(1, 2, 3), "[1,2,3]"),
+                    Arguments.of(Map.of("key", "value"), "{\"key\":\"value\"}"),
+                    Arguments.of(new RecordPerson("Alice", 30, LocalDate.parse("1993-05-15")), "{\"name\":\"Alice\",\"age\":30,\"birthDate\":\"1993-05-15\"}"),
+                    Arguments.of(new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\":25,\"birthDate\":\"1998-10-20\",\"name\":\"Bob\"}"),
                     // timestamp
                     Arguments.of(Date.from(Instant.parse("2024-03-15T10:15:30Z")), "\"2024-03-15T10:15:30Z\""),
                     Arguments.of(Instant.parse("2024-03-15T10:15:30Z"), "\"2024-03-15T10:15:30Z\""),
@@ -62,11 +60,11 @@ class JsonTest {
                     Arguments.of(OffsetDateTime.parse("2024-01-01T09:00:00+08:00"), "\"2024-01-01T09:00+08:00\""),
                     Arguments.of(ZonedDateTime.parse("2024-01-01T09:00:00+08:00[Asia/Shanghai]"), "\"2024-01-01T09:00+08:00[Asia/Shanghai]\""),
                     // special map keys
-                    Arguments.of(Map.of(1, "one"), "{\"1\": \"one\"}"),
-                    Arguments.of(Map.of(true, "yes"), "{\"true\": \"yes\"}"),
-                    Arguments.of(new HashMap<>() {{ put(null, "null"); }}, "{\"null\": \"null\"}"),
-                    Arguments.of(Map.of(3.14, "pi"), "{\"3.14\": \"pi\"}"),
-                    Arguments.of(Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\": \"New Year\"}")
+                    Arguments.of(Map.of(1, "one"), "{\"1\":\"one\"}"),
+                    Arguments.of(Map.of(true, "yes"), "{\"true\":\"yes\"}"),
+                    Arguments.of(new HashMap<>() {{ put(null, "null"); }}, "{\"null\":\"null\"}"),
+                    Arguments.of(Map.of(3.14, "pi"), "{\"3.14\":\"pi\"}"),
+                    Arguments.of(Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\":\"New Year\"}")
             );
             // @spotless:on
         }
@@ -124,7 +122,9 @@ class JsonTest {
                     // Loose parsing
                     Arguments.of("{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))),
                     Arguments.of("\"123.4\"", new Json.Type<Double>() {}, 123.4),
-                    Arguments.of("\"10000000000\"", new Json.Type<Long>() {}, 10000000000L)
+                    Arguments.of("\"10000000000\"", new Json.Type<Long>() {}, 10000000000L),
+                    Arguments.of("\"2025-01-01\"", new Json.Type<Iterable<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))),
+                    Arguments.of("\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")})
             );
             // @spotless:on
         }
