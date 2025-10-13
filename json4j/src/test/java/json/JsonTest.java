@@ -162,5 +162,30 @@ class JsonTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Cannot assign null to primitive");
         }
+
+        private static Stream<Arguments> invalidJsonArgs() {
+            // @spotless:off
+            return Stream.of(
+                    Arguments.of("\"1.5", "Unterminated string at line 1, col 5"),
+                    Arguments.of("nul", "Invalid literal, expected 'null' at line 1, col 4"),
+                    Arguments.of("tru", "Invalid literal, expected 'true' at line 1, col 4"),
+                    Arguments.of("fals", "Invalid literal, expected 'false' at line 1, col 5"),
+                    Arguments.of("false,", "Trailing characters after top-level value at line 1, col 7 (token COMMA)"),
+                    Arguments.of("1,2", "Trailing characters after top-level value at line 1, col 3 (token COMMA)"),
+                    Arguments.of("{x:1}", "Unexpected character: 'x' at line 1, col 2"),
+                    Arguments.of("{1:2}", "Expected string as object key at line 1, col 3 (token NUMBER)"),
+                    Arguments.of("{\"x\":1", "Expected ',' or '}' in object at line 1, col 7 (token EOF)"),
+                    Arguments.of("[1,2", "Expected ',' or ']' in array at line 1, col 5 (token EOF)")
+            );
+            // @spotless:on
+        }
+
+        @ParameterizedTest
+        @MethodSource("invalidJsonArgs")
+        void invalidJson(String input, String containsMessage) {
+            assertThatCode(() -> Json.parse(input, Object.class))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining(containsMessage);
+        }
     }
 }
