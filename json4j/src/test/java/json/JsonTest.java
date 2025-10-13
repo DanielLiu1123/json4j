@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.Timestamp;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -121,6 +122,9 @@ class JsonTest {
                     Arguments.of("1", new Json.Type<Boolean>() {}, true),
                     Arguments.of("0", new Json.Type<Boolean>() {}, false),
                     Arguments.of("0", new Json.Type<Character>() {}, '0'),
+                    Arguments.of("\"MONDAY\"", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY), // exact match
+                    Arguments.of("\"monday\"", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY), // case-insensitive
+                    Arguments.of("0", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY), // ordinal
                     Arguments.of("\"true\"", new Json.Type<Boolean>() {}, true),
                     Arguments.of("\"false\"", new Json.Type<Boolean>() {}, false),
                     Arguments.of("\"123.4\"", new Json.Type<Double>() {}, 123.4),
