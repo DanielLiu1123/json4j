@@ -1,6 +1,8 @@
 description = "json4j"
 
 dependencies {
+    compileOnly("com.google.protobuf:protobuf-java:3.25.3")
+    testImplementation("com.google.protobuf:protobuf-java:3.25.3")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.assertj:assertj-core:+")
 }
