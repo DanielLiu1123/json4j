@@ -516,17 +516,11 @@ public final class Json {
             BigDecimal b = new BigDecimal(s), n = b.stripTrailingZeros();
             if (n.scale() <= 0) {
                 try {
-                    return n.intValueExact();
-                } catch (ArithmeticException e1) {
-                    try {
-                        return n.longValueExact();
-                    } catch (ArithmeticException e2) {
-                        try {
-                            return n.toBigIntegerExact();
-                        } catch (ArithmeticException e3) {
-                            return b;
-                        }
-                    }
+                    long l = n.longValueExact();
+                    if ((int) l == l) return (int) l; // Do NOT use Ternary Operator here!
+                    return l;
+                } catch (ArithmeticException e) {
+                    return n.toBigIntegerExact();
                 }
             } else {
                 double d = b.doubleValue();
