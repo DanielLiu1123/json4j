@@ -854,7 +854,7 @@ public final class Json {
         }
 
         // 2.2 number: accept JsonNumber, numeric strings, and booleans (true->1, false->0)
-        if (Number.class.isAssignableFrom(raw) || raw.isPrimitive() && raw != char.class) {
+        if (Number.class.isAssignableFrom(raw) || (raw.isPrimitive() && raw != char.class)) {
             return (T) coerceNumber(jv, raw);
         }
 
