@@ -65,15 +65,21 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Date;
-import java.util.HashMap;
+import java.util.EnumMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Stack;
+import java.util.TreeMap;
+import java.util.Vector;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Minimal, standard-first JSON writer and parser.
@@ -908,7 +914,7 @@ public final class Json {
     private static Object mapFromJson(JsonObject jo, java.lang.reflect.Type type, Class<?> raw) {
         var keyType = mapKeyType(type);
         var valueType = mapValueType(type);
-        Map<Object, Object> map = createMap(raw);
+        var map = createMap(raw, jo.value().size());
         for (var en : jo.value().entrySet()) {
             Object key = fromJsonValue(new JsonString(en.getKey()), keyType);
             Object val = fromJsonValue(en.getValue(), valueType);
@@ -917,21 +923,32 @@ public final class Json {
         return map;
     }
 
-    private static Map<Object, Object> createMap(Class<?> raw) {
-        if (raw == Map.class || raw == LinkedHashMap.class) return new LinkedHashMap<>();
-        if (raw == HashMap.class) return new HashMap<>();
-        if (raw == ConcurrentMap.class || raw == ConcurrentHashMap.class) return new ConcurrentHashMap<>();
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    static Map<Object, Object> createMap(Class<?> raw, int size) {
+        int cap = mapCap(size);
+        if (typeBetween(raw, LinkedHashMap.class, Map.class)) return new LinkedHashMap<>(cap);
+        if (typeBetween(raw, TreeMap.class, null)) return new TreeMap<>();
+        if (typeBetween(raw, EnumMap.class, null)) {
+            if (!typeBetween(raw, null, Enum.class))
+                throw new IllegalStateException("EnumMap requires Enum key type: " + raw.getName());
+            return new EnumMap(raw.asSubclass(Enum.class));
+        }
+        if (typeBetween(raw, IdentityHashMap.class, null)) return new IdentityHashMap<>(cap);
+        if (typeBetween(raw, ConcurrentHashMap.class, null)) return new ConcurrentHashMap<>(cap);
+        if (typeBetween(raw, ConcurrentSkipListMap.class, null)) return new ConcurrentSkipListMap<>();
         try {
-            @SuppressWarnings("unchecked")
-            Map<Object, Object> m =
-                    (Map<Object, Object>) raw.getDeclaredConstructor().newInstance();
-            return m;
+            return (Map<Object, Object>) raw.getDeclaredConstructor().newInstance();
         } catch (Exception e) {
             throw new IllegalStateException("Unsupported Map type: " + raw.getName(), e);
         }
     }
 
-    private static Object recordFromJson(JsonObject jo, Class<?> raw) {
+    static int mapCap(int size) {
+        int n = -1 >>> Integer.numberOfLeadingZeros(size - 1);
+        return (n < 0) ? 1 : (n >= 1 << 30) ? 1 << 30 : n + 1;
+    }
+
+    static Object recordFromJson(JsonObject jo, Class<?> raw) {
         try {
             var components = raw.getRecordComponents();
             Class<?>[] ctorTypes =
@@ -1073,18 +1090,22 @@ public final class Json {
     }
 
     private static Object collectionFromJson(JsonArray ja, java.lang.reflect.Type type, Class<?> raw) {
-        var coll = createCollection(raw);
+        var coll = createCollection(raw, ja.value().size());
         var elemType = collectionElementType(type);
         for (var v : ja.value()) coll.add(fromJsonValue(v, elemType));
         return coll;
     }
 
     @SuppressWarnings("unchecked")
-    private static Collection<Object> createCollection(Class<?> raw) {
-        if (typeBetween(raw, ArrayList.class, null)) return new ArrayList<>();
+    private static Collection<Object> createCollection(Class<?> raw, int size) {
+        if (typeBetween(raw, ArrayList.class, Iterable.class)) return new ArrayList<>(size);
         if (typeBetween(raw, LinkedList.class, null)) return new LinkedList<>();
-        if (typeBetween(raw, LinkedHashSet.class, null)) return new LinkedHashSet<>();
-        if (typeBetween(raw, ArrayDeque.class, null)) return new ArrayDeque<>();
+        if (typeBetween(raw, LinkedHashSet.class, null)) return new LinkedHashSet<>(size);
+        if (typeBetween(raw, ArrayDeque.class, null)) return new ArrayDeque<>(size);
+        if (typeBetween(raw, Vector.class, null)) return new Vector<>(size);
+        if (typeBetween(raw, Stack.class, null)) return new Stack<>();
+        if (typeBetween(raw, ArrayBlockingQueue.class, null)) return new ArrayBlockingQueue<>(size);
+        if (typeBetween(raw, CopyOnWriteArrayList.class, null)) return new CopyOnWriteArrayList<>();
         try {
             return (Collection<Object>) raw.getDeclaredConstructor().newInstance();
         } catch (Exception e) {
