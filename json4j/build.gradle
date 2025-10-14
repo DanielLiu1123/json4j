@@ -4,6 +4,7 @@ dependencies {
     optional("com.google.protobuf:protobuf-java:${protobufVersion}")
     testImplementation("com.google.protobuf:protobuf-java:${protobufVersion}")
     testImplementation("com.google.protobuf:protobuf-java-util:${protobufVersion}")
+    testImplementation("com.google.api.grpc:proto-google-common-protos:${commonProtosVersion}")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.assertj:assertj-core:+")
 }

@@ -3,6 +3,12 @@ package json;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import com.google.protobuf.BoolValue;
+import com.google.protobuf.Int32Value;
+import com.google.protobuf.ListValue;
+import com.google.protobuf.NullValue;
+import com.google.protobuf.Struct;
+import com.google.protobuf.Value;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.Timestamp;
@@ -143,7 +149,28 @@ class JsonTest {
                     // Protobuf support
                     Arguments.of("{\"id\":1,\"name\":\"Freeman\",\"status\":\"ACTIVE\",\"hobbyList\":[{\"id\":1,\"name\":\"gaming\"}],\"hobbyMap\":{\"1\":{\"id\":1,\"name\":\"gaming\"}}}", new Json.Type<User>() {}, User.newBuilder().setId(1).setName("Freeman").setStatus(User.Status.ACTIVE).addAllHobbyList(List.of(Hobby.newBuilder().setId(1).setName("gaming").build())).putAllHobbyMap(Map.of(1L, Hobby.newBuilder().setId(1).setName("gaming").build())).build()),
                     Arguments.of("{}", new Json.Type<User>() {}, User.newBuilder().build()),
-                    Arguments.of("{\"id\":0,\"hobby_list\":[]}", new Json.Type<User>() {}, User.newBuilder().build())
+                    Arguments.of("{\"id\":0,\"hobby_list\":[]}", new Json.Type<User>() {}, User.newBuilder().build()),
+                    Arguments.of("1", new Json.Type<Int32Value>() {}, Int32Value.newBuilder().setValue(1).build()),
+                    Arguments.of("1", new Json.Type<Value>() {}, Value.newBuilder().setNumberValue(1).build()),
+                    Arguments.of("null", new Json.Type<NullValue>() {}, NullValue.NULL_VALUE),
+                    Arguments.of("0", new Json.Type<NullValue>() {}, NullValue.NULL_VALUE),
+                    Arguments.of("\"NULL_VALUE\"", new Json.Type<NullValue>() {}, NullValue.NULL_VALUE),
+                    Arguments.of("2", new Json.Type<com.google.type.DayOfWeek>() {}, com.google.type.DayOfWeek.TUESDAY),
+                    Arguments.of("\"UNRECOGNIZED\"", new Json.Type<com.google.type.DayOfWeek>() {}, com.google.type.DayOfWeek.UNRECOGNIZED),
+                    Arguments.of("null", new Json.Type<Value>() {}, Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()),
+                    Arguments.of("null", new Json.Type<ListValue>() {}, ListValue.newBuilder().addValues(Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build()).build()),
+                    Arguments.of("\"NULL_VALUE\"", new Json.Type<Value>() {}, Value.newBuilder().setStringValue("NULL_VALUE").build()),
+                    Arguments.of("[]", new Json.Type<ListValue>() {}, ListValue.newBuilder().build()),
+                    Arguments.of("[]", new Json.Type<Value>() {}, Value.newBuilder().setListValue(ListValue.newBuilder().build()).build()),
+                    Arguments.of("\"str\"", new Json.Type<Value>() {}, Value.newBuilder().setStringValue("str").build()),
+                    Arguments.of("true", new Json.Type<Value>() {}, Value.newBuilder().setBoolValue(true).build(),
+                    Arguments.of("\"true\"", new Json.Type<BoolValue>() {}, Value.newBuilder().setBoolValue(true).build())),
+                    Arguments.of("{\"value\":true}", new Json.Type<Struct>() {}, Struct.newBuilder().putFields("value", Value.newBuilder().setBoolValue(true).build()).build()),
+                    Arguments.of("{\"value\":true}", new Json.Type<Value>() {}, Value.newBuilder().setStructValue(Struct.newBuilder().putFields("value", Value.newBuilder().setBoolValue(true).build()).build()).build()),
+                    Arguments.of("[1,true,\"str\"]", new Json.Type<ListValue>() {}, ListValue.newBuilder().addValues(Value.newBuilder().setNumberValue(1).build()).addValues(Value.newBuilder().setBoolValue(true).build()).addValues(Value.newBuilder().setStringValue("str").build()).build()),
+                    Arguments.of("[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<List<User>>() {}, List.of(User.newBuilder().setId(1).setName("Freeman").build())),
+                    Arguments.of("[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<User[]>() {}, new User[] {User.newBuilder().setId(1).setName("Freeman").build()}),
+                    Arguments.of("[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<ListValue>() {}, ListValue.newBuilder().addValues(Value.newBuilder().setStructValue(Struct.newBuilder().putFields("id", Value.newBuilder().setNumberValue(1).build()).putFields("name", Value.newBuilder().setStringValue("Freeman").build()).build()).build()).build())
             );
             // @spotless:on
         }
