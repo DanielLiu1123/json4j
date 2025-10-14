@@ -1,6 +1,7 @@
 plugins {
     id "com.diffplug.spotless" version "${spotlessVersion}" apply false
     id "org.jreleaser" version "${jReleaserVersion}" apply false
+    id "com.google.protobuf" version "+" apply false
 }
 
 subprojects {

@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package json4j.user;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+
+message User {
+  int64 id = 1;
+  string name = 2;
+  Status status = 3;
+  repeated Hobby hobby_list = 4;
+  map<int64, Hobby> hobby_map = 5;
+
+  google.protobuf.Timestamp created_at = 10;
+  optional int64 deleted_at = 11;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    ACTIVE = 1;
+    INACTIVE = 2;
+    BANNED = 3;
+  }
+}
+
+message Hobby {
+  int64 id = 1;
+  string name = 2;
+}
