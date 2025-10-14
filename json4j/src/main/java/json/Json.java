@@ -1,6 +1,10 @@
 package json;
 
+import com.google.protobuf.Descriptors;
 import com.google.protobuf.LazyStringArrayList;
+import com.google.protobuf.MessageOrBuilder;
+import com.google.protobuf.NullValue;
+import com.google.protobuf.ProtocolMessageEnum;
 import com.google.protobuf.ProtocolStringList;
 import java.beans.Introspector;
 import java.lang.reflect.Array;
@@ -578,12 +582,8 @@ public final class Json {
                 writeMap(m);
                 return;
             }
-            if (ProtobufSupport.isMessageOrBuilder(o)) {
-                ProtobufSupport.writeMessageOrBuilder(this, (com.google.protobuf.MessageOrBuilder) o);
-                return;
-            }
-            if (ProtobufSupport.isEnum(o)) {
-                ProtobufSupport.writeEnum(this, (com.google.protobuf.ProtocolMessageEnum) o);
+            if (ProtobufSupport.isProtobuf(o)) {
+                ProtobufSupport.writeProtobuf(this, o);
                 return;
             }
             if (o instanceof Enum<?> e) {
@@ -1307,7 +1307,7 @@ public final class Json {
         private ProtobufSupport() {}
 
         static boolean isProtobuf(Object o) {
-            return isMessageOrBuilder(o) || isEnum(o) || isSpecialType(o);
+            return isProtobufClass(o.getClass());
         }
 
         static boolean isSpecialType(Object o) {
@@ -1320,6 +1320,10 @@ public final class Json {
 
         static boolean isMessageOrBuilder(Object o) {
             return isMessageOrBuilderClass(o.getClass());
+        }
+
+        static boolean isProtobufClass(Class<?> raw) {
+            return isMessageOrBuilderClass(raw) || isEnumClass(raw) || isSpecialTypeClass(raw);
         }
 
         static boolean isSpecialTypeClass(Class<?> raw) {
@@ -1339,16 +1343,45 @@ public final class Json {
         }
 
         static boolean isEnumClass(Class<?> raw) {
-            return PROTOBUF_PRESENT && typeBetween(raw, null, com.google.protobuf.ProtocolMessageEnum.class);
+            return PROTOBUF_PRESENT
+                    && (typeBetween(raw, null, com.google.protobuf.ProtocolMessageEnum.class)
+                            || typeBetween(raw, null, Descriptors.EnumValueDescriptor.class));
+        }
+
+        static void writeProtobuf(JsonWriter writer, Object o) {
+            if (isMessageOrBuilder(o)) writeMessageOrBuilder(writer, (com.google.protobuf.MessageOrBuilder) o);
+            else if (isEnum(o)) writeEnum(writer, o);
+            else if (isSpecialType(o)) writeSpecialType(writer, o);
+            else
+                throw new IllegalStateException("Not a protobuf Message, Builder, Enum, or special type: "
+                        + o.getClass().getName());
         }
 
         static void writeMessageOrBuilder(JsonWriter writer, com.google.protobuf.MessageOrBuilder message) {
             if (writeWellKnown(writer, message)) return;
             writer.out.append('{');
             boolean first = true;
-            for (var entry : message.getAllFields().entrySet()) {
-                var field = entry.getKey();
-                var v = entry.getValue();
+
+            for (var field : message.getDescriptorForType().getFields()) {
+                if (field.isOptional()) {
+                    // Sync with
+                    // com.google.protobuf.util.JsonFormat.PrinterImpl.print(com.google.protobuf.MessageOrBuilder,
+                    // java.lang.String)
+                    if (field.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
+                            && !message.hasField(field)) {
+                        // Always skip empty optional message fields. If not we will recurse indefinitely if
+                        // a message has itself as a sub-field.
+                        continue;
+                    }
+                    var oneof = field.getContainingOneof();
+                    if (oneof != null && !message.hasField(field)) {
+                        // Skip all oneof fields except the one that is actually set
+                        continue;
+                    }
+                }
+                Object v;
+                if (field.isMapField()) v = invokeGetter(message, field); // map field's entry.getValue is list
+                else v = message.getField(field);
                 if (!first) writer.out.append(',');
                 first = false;
                 writer.writeString(field.getJsonName());
@@ -1358,10 +1391,30 @@ public final class Json {
             writer.out.append('}');
         }
 
-        static void writeEnum(JsonWriter writer, com.google.protobuf.ProtocolMessageEnum e) {
-            if (e == com.google.protobuf.NullValue.NULL_VALUE) {
-                writer.out.append("null");
-            } else writer.writeString(e.getValueDescriptor().getName());
+        static void writeEnum(JsonWriter writer, Object e) {
+            if (!(e instanceof ProtocolMessageEnum) && !(e instanceof Descriptors.EnumValueDescriptor)) {
+                throw new IllegalStateException(
+                        "Not a protobuf Enum: " + e.getClass().getName());
+            }
+
+            Descriptors.EnumValueDescriptor evd = e instanceof ProtocolMessageEnum pme
+                    ? pme.getValueDescriptor()
+                    : (Descriptors.EnumValueDescriptor) e;
+
+            if (evd.getFullName().equals(NullValue.getDescriptor().getFullName())) {
+                writer.writeAny(null);
+            } else {
+                writer.writeAny(evd.getName());
+            }
+        }
+
+        static void writeSpecialType(JsonWriter writer, Object o) {
+            if (o instanceof ProtocolStringList list) {
+                writer.writeAny(List.copyOf(list));
+            } else {
+                throw new IllegalStateException(
+                        "Unsupported special protobuf type: " + o.getClass().getName());
+            }
         }
 
         static Object parseProtobuf(JsonValue json, Class<?> raw) {
@@ -1499,6 +1552,19 @@ public final class Json {
 
         static java.lang.reflect.Type getterType(
                 com.google.protobuf.Message.Builder builder, com.google.protobuf.Descriptors.FieldDescriptor field) {
+            var getterMethodName = getterMethodName(field);
+            try {
+                var m = builder.getClass().getMethod(getterMethodName);
+                return m.getGenericReturnType();
+            } catch (NoSuchMethodException e) {
+                throw new IllegalStateException(
+                        "Cannot find getter " + getterMethodName + " on "
+                                + builder.getClass().getName(),
+                        e);
+            }
+        }
+
+        private static String getterMethodName(Descriptors.FieldDescriptor field) {
             var snake = toCamelCase(field.getName());
             String getterMethodName;
             if (field.isMapField()) {
@@ -1508,13 +1574,18 @@ public final class Json {
             } else {
                 getterMethodName = "get" + Character.toUpperCase(snake.charAt(0)) + snake.substring(1);
             }
+            return getterMethodName;
+        }
+
+        static Object invokeGetter(MessageOrBuilder messageOrBuilder, Descriptors.FieldDescriptor field) {
+            var getter = getterMethodName(field);
             try {
-                var m = builder.getClass().getMethod(getterMethodName);
-                return m.getGenericReturnType();
-            } catch (NoSuchMethodException e) {
+                var m = messageOrBuilder.getClass().getMethod(getter);
+                return m.invoke(messageOrBuilder);
+            } catch (Exception e) {
                 throw new IllegalStateException(
-                        "Cannot find getter " + getterMethodName + " on "
-                                + builder.getClass().getName(),
+                        "Cannot invoke getter " + getter + " on "
+                                + messageOrBuilder.getClass().getName(),
                         e);
             }
         }

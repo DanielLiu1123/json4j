@@ -17,6 +17,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import json4j.user.Hobby;
+import json4j.user.User;
 import lombok.Data;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -66,7 +68,10 @@ class JsonTest {
                     Arguments.of(Map.of(true, "yes"), "{\"true\":\"yes\"}"),
                     Arguments.of(new HashMap<>() {{ put(null, "null"); }}, "{\"null\":\"null\"}"),
                     Arguments.of(Map.of(3.14, "pi"), "{\"3.14\":\"pi\"}"),
-                    Arguments.of(Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\":\"New Year\"}")
+                    Arguments.of(Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\":\"New Year\"}"),
+                    // Protobuf support
+                    Arguments.of(User.newBuilder().setId(1).setName("Freeman").setStatus(User.Status.ACTIVE).addAllHobbyList(List.of(Hobby.newBuilder().setId(1).setName("gaming").build())).putAllHobbyMap(Map.of(1L, Hobby.newBuilder().setId(1).setName("gaming").build())).build(), "{\"id\":1,\"name\":\"Freeman\",\"status\":\"ACTIVE\",\"hobbyList\":[{\"id\":1,\"name\":\"gaming\"}],\"hobbyMap\":{\"1\":{\"id\":1,\"name\":\"gaming\"}}}"),
+                    Arguments.of(User.newBuilder().build(), "{\"id\":0,\"name\":\"\",\"status\":\"STATUS_UNSPECIFIED\",\"hobbyList\":[],\"hobbyMap\":{}}")
             );
             // @spotless:on
         }
