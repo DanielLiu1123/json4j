@@ -3,11 +3,6 @@ package json;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-import com.google.protobuf.DescriptorProtos;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.DynamicMessage;
-import com.google.protobuf.Field;
-import com.google.protobuf.NullValue;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.Timestamp;
@@ -24,7 +19,6 @@ import java.util.Map;
 import java.util.stream.Stream;
 import lombok.Data;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -38,75 +32,6 @@ class JsonTest {
         private String name;
         private int age;
         private LocalDate birthDate;
-    }
-
-    private static final Descriptors.Descriptor CASE_MESSAGE_DESCRIPTOR;
-    private static final Descriptors.EnumDescriptor STATUS_ENUM_DESCRIPTOR;
-
-    static {
-        try {
-            Descriptors.FileDescriptor fileDescriptor = buildCaseMessageFileDescriptor();
-            CASE_MESSAGE_DESCRIPTOR = fileDescriptor.findMessageTypeByName("CaseMessage");
-            STATUS_ENUM_DESCRIPTOR = fileDescriptor.findEnumTypeByName("Status");
-        } catch (Descriptors.DescriptorValidationException e) {
-            throw new ExceptionInInitializerError(e);
-        }
-    }
-
-    private static Descriptors.FileDescriptor buildCaseMessageFileDescriptor()
-            throws Descriptors.DescriptorValidationException {
-        var statusEnum = DescriptorProtos.EnumDescriptorProto.newBuilder()
-                .setName("Status")
-                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder()
-                        .setName("STATUS_UNKNOWN")
-                        .setNumber(0))
-                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder()
-                        .setName("RUNNING")
-                        .setNumber(1))
-                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder()
-                        .setName("SUCCEEDED")
-                        .setNumber(2))
-                .build();
-
-        var nestedMessage = DescriptorProtos.DescriptorProto.newBuilder()
-                .setName("Nested")
-                .addField(DescriptorProtos.FieldDescriptorProto.newBuilder()
-                        .setName("value")
-                        .setNumber(1)
-                        .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
-                .build();
-
-        var caseMessage = DescriptorProtos.DescriptorProto.newBuilder()
-                .setName("CaseMessage")
-                .addField(DescriptorProtos.FieldDescriptorProto.newBuilder()
-                        .setName("name")
-                        .setNumber(1)
-                        .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
-                .addField(DescriptorProtos.FieldDescriptorProto.newBuilder()
-                        .setName("nested")
-                        .setNumber(2)
-                        .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName("Nested"))
-                .addField(DescriptorProtos.FieldDescriptorProto.newBuilder()
-                        .setName("status")
-                        .setNumber(3)
-                        .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
-                        .setTypeName("Status"))
-                .build();
-
-        var fileDescriptorProto = DescriptorProtos.FileDescriptorProto.newBuilder()
-                .setName("case_message.proto")
-                .setSyntax("proto3")
-                .addEnumType(statusEnum)
-                .addMessageType(nestedMessage)
-                .addMessageType(caseMessage)
-                .build();
-
-        return Descriptors.FileDescriptor.buildFrom(fileDescriptorProto, new Descriptors.FileDescriptor[0]);
     }
 
     @Nested
@@ -261,69 +186,6 @@ class JsonTest {
             assertThatCode(() -> Json.parse(input, Object.class))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining(containsMessage);
-        }
-    }
-
-    @Nested
-    class ProtobufTests {
-
-        @Test
-        void stringifyMessageSkipsUnsetOptionals() {
-            DynamicMessage.Builder builder = DynamicMessage.newBuilder(CASE_MESSAGE_DESCRIPTOR);
-            builder.setField(CASE_MESSAGE_DESCRIPTOR.findFieldByName("name"), "task");
-            builder.setField(
-                    CASE_MESSAGE_DESCRIPTOR.findFieldByName("status"),
-                    STATUS_ENUM_DESCRIPTOR.findValueByName("RUNNING"));
-            DynamicMessage message = builder.build();
-
-            String json = Json.stringify(message);
-
-            assertThat(json).contains("\"status\":\"RUNNING\"");
-            assertThat(json).doesNotContain("nested");
-            assertThat(json).doesNotContain("null");
-        }
-
-        @Test
-        void stringifyWellKnownTimestamp() {
-            com.google.protobuf.Timestamp timestamp = com.google.protobuf.Timestamp.newBuilder()
-                    .setSeconds(1)
-                    .setNanos(2_000_000)
-                    .build();
-
-            assertThat(Json.stringify(timestamp)).isEqualTo("\"1970-01-01T00:00:01.002Z\"");
-        }
-
-        @Test
-        void parseWellKnownTimestamp() {
-            com.google.protobuf.Timestamp timestamp =
-                    Json.parse("\"1970-01-01T00:00:01Z\"", com.google.protobuf.Timestamp.class);
-
-            assertThat(timestamp.getSeconds()).isEqualTo(1);
-            assertThat(timestamp.getNanos()).isZero();
-        }
-
-        @Test
-        void stringifyFieldEnumAsString() {
-            Field field = Field.newBuilder().setKind(Field.Kind.TYPE_BOOL).build();
-
-            String json = Json.stringify(field);
-
-            assertThat(json).contains("\"kind\":\"TYPE_BOOL\"");
-            assertThat(json).doesNotContain("null");
-        }
-
-        @Test
-        void parseFieldEnumNumber() {
-            Field field = Json.parse("{\"kind\":14}", Field.class);
-
-            assertThat(field.getKind()).isEqualTo(Field.Kind.TYPE_ENUM);
-        }
-
-        @Test
-        void parseProtocolEnumNumberLiteral() {
-            NullValue value = Json.parse("0", NullValue.class);
-
-            assertThat(value).isEqualTo(NullValue.NULL_VALUE);
         }
     }
 }

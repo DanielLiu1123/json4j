@@ -1,6 +1,7 @@
 package json;
 
-import com.google.protobuf.MessageOrBuilder;
+import com.google.protobuf.LazyStringArrayList;
+import com.google.protobuf.ProtocolStringList;
 import java.beans.Introspector;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
@@ -27,17 +28,13 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Date;
-import java.util.Deque;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -582,11 +579,11 @@ public final class Json {
                 return;
             }
             if (ProtobufSupport.isMessageOrBuilder(o)) {
-                writeProtobufMessage((com.google.protobuf.MessageOrBuilder) o);
+                ProtobufSupport.writeMessageOrBuilder(this, (com.google.protobuf.MessageOrBuilder) o);
                 return;
             }
             if (ProtobufSupport.isEnum(o)) {
-                writeProtobufEnum((com.google.protobuf.ProtocolMessageEnum) o);
+                ProtobufSupport.writeEnum(this, (com.google.protobuf.ProtocolMessageEnum) o);
                 return;
             }
             if (o instanceof Enum<?> e) {
@@ -731,14 +728,6 @@ public final class Json {
             out.append('}');
         }
 
-        private void writeProtobufMessage(com.google.protobuf.MessageOrBuilder message) {
-            ProtobufSupport.writeMessage(this, message);
-        }
-
-        private void writeProtobufEnum(com.google.protobuf.ProtocolMessageEnum e) {
-            ProtobufSupport.writeEnum(this, e);
-        }
-
         private void writeRecord(Object r) {
             out.append('{');
             boolean first = true;
@@ -820,8 +809,11 @@ public final class Json {
         if (raw == Object.class) return (T) fromUntyped(jv); // best-effort untyped
         if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jv, raw); // return AST as-is
 
+        // Addition support for Protobuf (
+        if (ProtobufSupport.isProtobuf(raw)) return (T) ProtobufSupport.parseProtobuf(jv, raw);
+
         // 1) Null handling
-        if (jv instanceof JsonNull jn) return (T) nullValueFor(jn, raw);
+        if (jv instanceof JsonNull) return (T) nullValueFor(raw);
 
         // 2) Scalar targets (LOOSE)
 
@@ -831,7 +823,7 @@ public final class Json {
         }
 
         // 2.2 number: accept JsonNumber, numeric strings, and booleans (true->1, false->0)
-        if (Number.class.isAssignableFrom(raw) || (raw.isPrimitive() && raw != boolean.class && raw != char.class)) {
+        if (Number.class.isAssignableFrom(raw) || raw.isPrimitive() && raw != char.class) {
             return (T) coerceNumber(jv, raw);
         }
 
@@ -855,10 +847,6 @@ public final class Json {
         // 2.6 temporal: accept ISO-8601 string or epoch millis (number/string)
         if (isTemporal(raw)) {
             return (T) coerceTemporal(jv, raw);
-        }
-
-        if (ProtobufSupport.isMessageOrBuilderClass(raw)) {
-            return (T) ProtobufSupport.parseMessageOrBuilder(jv, raw);
         }
 
         // 3) Structured targets (LOOSE)
@@ -1054,20 +1042,18 @@ public final class Json {
     }
 
     private static Object collectionFromJson(JsonArray ja, java.lang.reflect.Type type, Class<?> raw) {
-        Collection<Object> coll = createCollection(raw);
-        java.lang.reflect.Type elemType = collectionElementType(type);
+        var coll = createCollection(raw);
+        var elemType = collectionElementType(type);
         for (var v : ja.value()) coll.add(fromJsonValue(v, elemType));
         return coll;
     }
 
     @SuppressWarnings("unchecked")
     private static Collection<Object> createCollection(Class<?> raw) {
-        if (raw == List.class || raw == ArrayList.class || raw == Collection.class || raw == Iterable.class)
-            return new ArrayList<>();
-        if (raw == LinkedList.class) return new LinkedList<>();
-        if (raw == Set.class || raw == LinkedHashSet.class) return new LinkedHashSet<>();
-        if (raw == HashSet.class) return new HashSet<>();
-        if (raw == Queue.class || raw == Deque.class || raw == ArrayDeque.class) return new ArrayDeque<>();
+        if (typeBetween(raw, ArrayList.class, null)) return new ArrayList<>();
+        if (typeBetween(raw, LinkedList.class, null)) return new LinkedList<>();
+        if (typeBetween(raw, LinkedHashSet.class, null)) return new LinkedHashSet<>();
+        if (typeBetween(raw, ArrayDeque.class, null)) return new ArrayDeque<>();
         try {
             return (Collection<Object>) raw.getDeclaredConstructor().newInstance();
         } catch (Exception e) {
@@ -1105,38 +1091,8 @@ public final class Json {
         throw new IllegalStateException("Unknown JsonValue: " + jv.getClass());
     }
 
-    private static Object nullValueFor(JsonNull jsonNull, Class<?> raw) {
+    private static Object nullValueFor(Class<?> raw) {
         if (raw.isPrimitive()) throw new IllegalStateException("Cannot assign null to primitive type " + raw.getName());
-        if (ProtobufSupport.isEnumClass(raw)) {
-            if (raw.isAssignableFrom(com.google.protobuf.NullValue.class))
-                return com.google.protobuf.NullValue.NULL_VALUE;
-        }
-        if (ProtobufSupport.isMessageOrBuilderClass(raw)) {
-            return ProtobufSupport.parseMessageOrBuilder(jsonNull, raw);
-        }
-        if (ProtobufSupport.isMessageClass(raw)) {
-            if (raw.isAssignableFrom(com.google.protobuf.Value.class)) {
-                return com.google.protobuf.Value.newBuilder()
-                        .setNullValue(com.google.protobuf.NullValue.NULL_VALUE)
-                        .build();
-            }
-            if (raw.isAssignableFrom(com.google.protobuf.Any.class)) {
-                return com.google.protobuf.Any.pack(com.google.protobuf.Value.newBuilder()
-                        .setNullValue(com.google.protobuf.NullValue.NULL_VALUE)
-                        .build());
-            }
-        }
-        if (ProtobufSupport.isMessageBuilderClass(raw)) {
-            if (raw.isAssignableFrom(com.google.protobuf.Value.Builder.class)) {
-                return com.google.protobuf.Value.newBuilder().setNullValue(com.google.protobuf.NullValue.NULL_VALUE);
-            }
-            if (raw.isAssignableFrom(com.google.protobuf.Any.Builder.class)) {
-                return com.google.protobuf.Any.pack(com.google.protobuf.Value.newBuilder()
-                                .setNullValue(com.google.protobuf.NullValue.NULL_VALUE)
-                                .build())
-                        .toBuilder();
-            }
-        }
         return null;
     }
 
@@ -1221,542 +1177,12 @@ public final class Json {
             throw new IllegalStateException("No enum constant " + raw.getName() + "." + s.value());
         }
         if (jv instanceof JsonNumber n) {
-            if (PROTOBUF_PRESENT) return ProtobufSupport.enumFromNumber(raw, n.value());
             int ord = n.value().intValue();
             Object[] cs = raw.getEnumConstants();
             if (ord < 0 || ord >= cs.length) throw new IllegalStateException("Enum ordinal out of range: " + ord);
             return cs[ord];
         }
         throw new IllegalStateException("Cannot coerce " + jv.getClass().getSimpleName() + " to enum " + raw.getName());
-    }
-
-    private static final class ProtobufSupport {
-
-        private ProtobufSupport() {}
-
-        static boolean isMessageOrBuilder(Object o) {
-            return isMessageOrBuilderClass(o.getClass());
-        }
-
-        static boolean isMessageOrBuilderClass(Class<?> raw) {
-            return PROTOBUF_PRESENT && MessageOrBuilder.class.isAssignableFrom(raw);
-        }
-
-        static boolean isEnum(Object o) {
-            return isEnumClass(o.getClass());
-        }
-
-        static boolean isMessageClass(Class<?> raw) {
-            return PROTOBUF_PRESENT && com.google.protobuf.Message.class.isAssignableFrom(raw);
-        }
-
-        static boolean isMessageBuilderClass(Class<?> raw) {
-            return PROTOBUF_PRESENT && com.google.protobuf.Message.Builder.class.isAssignableFrom(raw);
-        }
-
-        static boolean isEnumClass(Class<?> raw) {
-            return PROTOBUF_PRESENT && com.google.protobuf.ProtocolMessageEnum.class.isAssignableFrom(raw);
-        }
-
-        static void writeMessage(JsonWriter writer, com.google.protobuf.MessageOrBuilder message) {
-            if (writeWellKnown(writer, message)) return;
-            writer.out.append('{');
-            boolean first = true;
-            for (var entry : message.getAllFields().entrySet()) {
-                var field = entry.getKey();
-                var v = entry.getValue();
-                if (!first) writer.out.append(',');
-                first = false;
-                writer.writeString(field.getJsonName());
-                writer.out.append(':');
-                writer.writeAny(v);
-            }
-            writer.out.append('}');
-        }
-
-        static void writeEnum(JsonWriter writer, com.google.protobuf.ProtocolMessageEnum e) {
-            if (e == com.google.protobuf.NullValue.NULL_VALUE) {
-                writer.out.append("null");
-            } else writer.writeString(e.getValueDescriptor().getName());
-        }
-
-        static Object parseMessageOrBuilder(JsonValue json, Class<?> raw) {
-            if (isMessageClass(raw)) return parseMessage(json, raw);
-            if (isMessageBuilderClass(raw)) return parseMessageBuilder(json, raw);
-            throw new IllegalStateException("Not a protobuf Message or Builder class: " + raw.getName());
-        }
-
-        static Object parseMessage(JsonValue json, Class<?> raw) {
-            var builder = newBuilder(raw);
-            mergeIntoBuilder(json, builder);
-            return builder.build();
-        }
-
-        static Object parseMessageBuilder(JsonValue json, Class<?> raw) {
-            var builder = newBuilder(raw);
-            mergeIntoBuilder(json, builder);
-            return builder;
-        }
-
-        static Object enumFromNumber(Class<?> raw, Number number) {
-            var i = number.intValue();
-            for (Object constant : raw.getEnumConstants()) {
-                var pm = (com.google.protobuf.ProtocolMessageEnum) constant;
-                if (i == -1 && Objects.equals(pm.getValueDescriptor().getName(), "UNRECOGNIZED")) return pm;
-                if (pm.getNumber() == i) return pm;
-            }
-            throw new IllegalStateException("No enum constant " + raw.getName() + " with number " + i);
-        }
-
-        private static int toInt(Number number) {
-            long l = number.longValue();
-            if (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE)
-                throw new IllegalStateException("Enum number out of range: " + l);
-            return (int) l;
-        }
-
-        private static com.google.protobuf.Descriptors.FieldDescriptor mapKeyField(
-                com.google.protobuf.Descriptors.FieldDescriptor mapField) {
-            return mapField.getMessageType().findFieldByName("key");
-        }
-
-        private static com.google.protobuf.Descriptors.FieldDescriptor mapValueField(
-                com.google.protobuf.Descriptors.FieldDescriptor mapField) {
-            return mapField.getMessageType().findFieldByName("value");
-        }
-
-        private static boolean writeWellKnown(JsonWriter writer, com.google.protobuf.MessageOrBuilder message) {
-            if (message instanceof com.google.protobuf.TimestampOrBuilder t) {
-                writer.writeAny(
-                        Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.DurationOrBuilder d) {
-                writer.writeAny(Duration.ofSeconds(d.getSeconds(), d.getNanos()).toString());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.StringValueOrBuilder s) {
-                writer.writeAny(s.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.BytesValueOrBuilder b) {
-                writer.writeAny(Base64.getEncoder().encodeToString(b.getValue().toByteArray()));
-                return true;
-            }
-            if (message instanceof com.google.protobuf.BoolValueOrBuilder b) {
-                writer.writeAny(b.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.DoubleValueOrBuilder d) {
-                writer.writeAny(d.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.FloatValueOrBuilder f) {
-                writer.writeAny(f.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.Int32ValueOrBuilder i) {
-                writer.writeAny(i.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.UInt32ValueOrBuilder u32) {
-                writer.writeAny(u32.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.Int64ValueOrBuilder i64) {
-                writer.writeAny(i64.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.UInt64ValueOrBuilder u64) {
-                writer.writeAny(u64.getValue());
-                return true;
-            }
-            if (message instanceof com.google.protobuf.FieldMaskOrBuilder mask) {
-                writer.writeAny(String.join(",", mask.getPathsList()));
-                return true;
-            }
-            if (message instanceof com.google.protobuf.StructOrBuilder struct) {
-                writer.writeAny(structToJsonObject(struct));
-                return true;
-            }
-            if (message instanceof com.google.protobuf.ListValueOrBuilder list) {
-                writer.writeAny(listToJsonArray(list));
-                return true;
-            }
-            if (message instanceof com.google.protobuf.ValueOrBuilder value) {
-                writer.writeAny(valueToJsonValue(value));
-                return true;
-            }
-            if (message instanceof com.google.protobuf.EmptyOrBuilder) {
-                writer.writeAny(new JsonObject(Map.of()));
-                return true;
-            }
-            return false;
-        }
-
-        private static JsonObject structToJsonObject(com.google.protobuf.StructOrBuilder struct) {
-            Map<String, JsonValue> map = new LinkedHashMap<>();
-            for (var entry : struct.getFieldsMap().entrySet()) {
-                map.put(entry.getKey(), valueToJsonValue(entry.getValue()));
-            }
-            return new JsonObject(map);
-        }
-
-        private static JsonArray listToJsonArray(com.google.protobuf.ListValueOrBuilder listValue) {
-            List<JsonValue> list = new ArrayList<>();
-            for (com.google.protobuf.Value v : listValue.getValuesList()) list.add(valueToJsonValue(v));
-            return new JsonArray(list);
-        }
-
-        private static JsonValue valueToJsonValue(com.google.protobuf.ValueOrBuilder value) {
-            return switch (value.getKindCase()) {
-                case NULL_VALUE -> new JsonNull();
-                case NUMBER_VALUE -> new JsonNumber(value.getNumberValue());
-                case STRING_VALUE -> new JsonString(value.getStringValue());
-                case BOOL_VALUE -> new JsonBoolean(value.getBoolValue());
-                case STRUCT_VALUE -> structToJsonObject(value.getStructValue());
-                case LIST_VALUE -> listToJsonArray(value.getListValue());
-                case KIND_NOT_SET -> new JsonNull(); // maybe should throw?
-            };
-        }
-
-        private static void mergeIntoBuilder(JsonValue json, com.google.protobuf.Message.Builder builder) {
-            var descriptor = builder.getDescriptorForType();
-            // TODO(Freeman):
-            if (mergeWellKnown(json, builder, descriptor)) return;
-            JsonObject object = expectObject(json, descriptor.getFullName());
-            for (var entry : object.value().entrySet()) {
-                com.google.protobuf.Descriptors.FieldDescriptor field = findField(descriptor, entry.getKey());
-                if (field == null) continue;
-                assignField(builder, field, entry.getValue());
-            }
-        }
-
-        private static boolean mergeWellKnown(
-                JsonValue json,
-                com.google.protobuf.Message.Builder builder,
-                com.google.protobuf.Descriptors.Descriptor descriptor) {
-            String typeName = descriptor.getFullName();
-            try {
-                if (builder instanceof com.google.protobuf.Timestamp.Builder timestamp) {
-                    Instant instant = Instant.parse(expectString(json));
-                    timestamp.setSeconds(instant.getEpochSecond());
-                    timestamp.setNanos(instant.getNano());
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.Duration.Builder duration) {
-                    long seconds;
-                    int nanos = 0;
-                    String text = expectString(json);
-                    if (!text.endsWith("s")) throw new IllegalStateException("Duration must end with 's': " + text);
-                    text = text.substring(0, text.length() - 1);
-                    boolean neg = text.startsWith("-");
-                    if (neg) text = text.substring(1);
-                    int dot = text.indexOf('.');
-                    if (dot < 0) {
-                        seconds = Long.parseLong(text);
-                    } else {
-                        seconds = Long.parseLong(text.substring(0, dot));
-                        String frac = text.substring(dot + 1);
-                        if (frac.length() > 9)
-                            throw new IllegalStateException("Too many fractional digits in duration: " + text);
-                        frac = (frac + "000000000").substring(0, 9);
-                        nanos = Integer.parseInt(frac);
-                    }
-                    if (neg) {
-                        seconds = -seconds;
-                        nanos = -nanos;
-                    }
-                    duration.setSeconds(seconds);
-                    duration.setNanos(nanos);
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.StringValue.Builder stringValue) {
-                    stringValue.setValue(expectString(json));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.BytesValue.Builder bytesValue) {
-                    byte[] bytes = Base64.getDecoder().decode(expectString(json));
-                    bytesValue.setValue(com.google.protobuf.ByteString.copyFrom(bytes));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.BoolValue.Builder boolValue) {
-                    boolValue.setValue(fromJsonValue(json, Boolean.class));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.DoubleValue.Builder doubleValue) {
-                    doubleValue.setValue(fromJsonValue(json, Double.class));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.FloatValue.Builder floatValue) {
-                    floatValue.setValue(fromJsonValue(json, Float.class));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.Int32Value.Builder int32Value) {
-                    int32Value.setValue(fromJsonValue(json, Integer.class));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.UInt32Value.Builder uint32Value) {
-                    uint32Value.setValue(fromJsonValue(json, Integer.class));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.Int64Value.Builder int64Value) {
-                    int64Value.setValue(Long.parseLong(expectString(json)));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.UInt64Value.Builder uint64Value) {
-                    uint64Value.setValue(Long.parseUnsignedLong(expectString(json)));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.FieldMask.Builder fieldMask) {
-                    List<String> paths = Arrays.asList(expectString(json).split(","));
-                    fieldMask.clearPaths();
-                    fieldMask.addAllPaths(paths);
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.Struct.Builder structBuilder) {
-                    JsonObject obj = expectObject(json, typeName);
-                    structBuilder.clearFields();
-                    for (var entry : obj.value().entrySet()) {
-                        structBuilder.putFields(
-                                entry.getKey(), (com.google.protobuf.Value) buildValue(entry.getValue()));
-                    }
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.ListValue.Builder listValue) {
-                    JsonArray arr = expectArray(json);
-                    listValue.clearValues();
-                    for (JsonValue v : arr.value()) {
-                        listValue.addValues((com.google.protobuf.Value) buildValue(v));
-                    }
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.Value.Builder valueBuilder) {
-                    valueBuilder.clear();
-                    valueBuilder.mergeFrom((com.google.protobuf.Value) buildValue(json));
-                    return true;
-                }
-                if (builder instanceof com.google.protobuf.Empty.Builder) {
-                    return true;
-                }
-                return false;
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new IllegalStateException("Failed to merge well-known type " + typeName, e);
-            }
-        }
-
-        private static void assignField(
-                com.google.protobuf.Message.Builder builder,
-                com.google.protobuf.Descriptors.FieldDescriptor field,
-                JsonValue value) {
-            if (value instanceof JsonNull) {
-                builder.clearField(field);
-                return;
-            }
-            if (field.isMapField()) {
-                JsonObject object = expectObject(value, field.getJsonName());
-                Map<Object, Object> converted = new LinkedHashMap<>();
-                com.google.protobuf.Descriptors.FieldDescriptor keyField = mapKeyField(field);
-                com.google.protobuf.Descriptors.FieldDescriptor valueField = mapValueField(field);
-                for (var entry : object.value().entrySet()) {
-                    Object key = parseMapKey(keyField, entry.getKey());
-                    Object mapValue = convertValue(builder, valueField, entry.getValue());
-                    converted.put(key, mapValue);
-                }
-                builder.setField(field, converted);
-                return;
-            }
-            if (field.isRepeated()) {
-                List<JsonValue> array = expectArray(value).value();
-                List<Object> converted = new ArrayList<>(array.size());
-                for (JsonValue element : array) converted.add(convertValue(builder, field, element));
-                builder.setField(field, converted);
-                return;
-            }
-            builder.setField(field, convertValue(builder, field, value));
-        }
-
-        private static Object convertValue(
-                com.google.protobuf.Message.Builder builder,
-                com.google.protobuf.Descriptors.FieldDescriptor field,
-                JsonValue value) {
-            return switch (field.getJavaType()) {
-                case ENUM -> parseEnum(field, value);
-                case MESSAGE -> parseMessageValue(builder, field, value);
-                case BYTE_STRING -> decodeByteString(value);
-                case INT -> fromJsonValue(value, Integer.class);
-                case LONG -> parseLongValue(field, value);
-                case FLOAT -> fromJsonValue(value, Float.class);
-                case DOUBLE -> fromJsonValue(value, Double.class);
-                case BOOLEAN -> fromJsonValue(value, Boolean.class);
-                case STRING -> coerceString(value);
-            };
-        }
-
-        private static Object parseEnum(com.google.protobuf.Descriptors.FieldDescriptor field, JsonValue value) {
-            com.google.protobuf.Descriptors.EnumDescriptor enumType = field.getEnumType();
-            if (value instanceof JsonNumber n) {
-                com.google.protobuf.Descriptors.EnumValueDescriptor ev = enumType.findValueByNumber(toInt(n.value()));
-                if (ev == null)
-                    throw new IllegalStateException(
-                            "Unknown enum number " + n.value() + " for " + enumType.getFullName());
-                return ev;
-            }
-            String name = coerceString(value);
-            com.google.protobuf.Descriptors.EnumValueDescriptor ev = enumType.findValueByName(name);
-            if (ev != null) return ev;
-            for (com.google.protobuf.Descriptors.EnumValueDescriptor candidate : enumType.getValues()) {
-                if (candidate.getName().equalsIgnoreCase(name)) return candidate;
-            }
-            try {
-                int number = Integer.parseInt(name);
-                ev = enumType.findValueByNumber(number);
-            } catch (NumberFormatException ignored) {
-                // noop
-            }
-            if (ev == null)
-                throw new IllegalStateException("Unknown enum constant " + name + " for " + enumType.getFullName());
-            return ev;
-        }
-
-        private static Object parseMessageValue(
-                com.google.protobuf.Message.Builder parent,
-                com.google.protobuf.Descriptors.FieldDescriptor field,
-                JsonValue value) {
-            com.google.protobuf.Message.Builder nested = parent.newBuilderForField(field);
-            mergeIntoBuilder(value, nested);
-            return nested.build();
-        }
-
-        private static Object parseLongValue(com.google.protobuf.Descriptors.FieldDescriptor field, JsonValue value) {
-            long parsed;
-            if (value instanceof JsonString s) {
-                parsed = parseLong(field, s.value());
-            } else if (value instanceof JsonNumber n) {
-                parsed = n.value().longValue();
-            } else {
-                parsed = Long.parseLong(coerceString(value));
-            }
-            return parsed;
-        }
-
-        private static long parseLong(com.google.protobuf.Descriptors.FieldDescriptor field, String text) {
-            if (field.getType() == com.google.protobuf.Descriptors.FieldDescriptor.Type.UINT64
-                    || field.getType() == com.google.protobuf.Descriptors.FieldDescriptor.Type.FIXED64) {
-                return Long.parseUnsignedLong(text);
-            }
-            return Long.parseLong(text);
-        }
-
-        private static Object decodeByteString(JsonValue value) {
-            byte[] bytes = Base64.getDecoder().decode(expectString(value));
-            return com.google.protobuf.ByteString.copyFrom(bytes);
-        }
-
-        private static Object parseMapKey(com.google.protobuf.Descriptors.FieldDescriptor keyField, String key) {
-            return switch (keyField.getJavaType()) {
-                case BOOLEAN -> Boolean.parseBoolean(key);
-                case STRING -> key;
-                case INT -> Integer.parseInt(key);
-                case LONG -> Long.parseLong(key);
-                default -> key;
-            };
-        }
-
-        private static com.google.protobuf.Message.Builder newBuilder(Class<?> raw) {
-            if (isMessageBuilderClass(raw)) {
-                var enclosing = raw.getEnclosingClass();
-                if (enclosing != null && isMessageClass(enclosing)) {
-                    return newBuilder(enclosing);
-                }
-            }
-            try {
-                var method = raw.getMethod("newBuilder");
-                return (com.google.protobuf.Message.Builder) method.invoke(null);
-            } catch (Exception e) {
-                throw new IllegalStateException("Cannot create protobuf builder for " + raw.getName(), e);
-            }
-        }
-
-        private static com.google.protobuf.Descriptors.FieldDescriptor findField(
-                com.google.protobuf.Descriptors.Descriptor descriptor, String name) {
-            com.google.protobuf.Descriptors.FieldDescriptor direct = descriptor.findFieldByName(name);
-            if (direct != null) return direct;
-            for (com.google.protobuf.Descriptors.FieldDescriptor field : descriptor.getFields()) {
-                if (field.getJsonName().equals(name)) return field;
-            }
-            String snake = toSnakeCase(name);
-            if (!snake.equals(name)) {
-                com.google.protobuf.Descriptors.FieldDescriptor alt = descriptor.findFieldByName(snake);
-                if (alt != null) return alt;
-            }
-            String camel = toCamelCase(name);
-            if (!camel.equals(name)) {
-                for (com.google.protobuf.Descriptors.FieldDescriptor field : descriptor.getFields()) {
-                    if (field.getJsonName().equals(camel)) return field;
-                }
-            }
-            try {
-                int number = Integer.parseInt(name);
-                return descriptor.findFieldByNumber(number);
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-
-        private static JsonObject expectObject(JsonValue value, String context) {
-            if (value instanceof JsonObject obj) return obj;
-            throw new IllegalStateException("Expected JSON object for " + context);
-        }
-
-        private static JsonArray expectArray(JsonValue value) {
-            if (value instanceof JsonArray arr) return arr;
-            throw new IllegalStateException("Expected JSON array");
-        }
-
-        private static String expectString(JsonValue value) {
-            if (value instanceof JsonString s) return s.value();
-            return coerceString(value);
-        }
-
-        private static Object buildValue(JsonValue value) {
-            com.google.protobuf.Value.Builder builder = com.google.protobuf.Value.newBuilder();
-            if (value instanceof JsonNull) builder.setNullValue(com.google.protobuf.NullValue.NULL_VALUE);
-            else if (value instanceof JsonBoolean b) builder.setBoolValue(b.value());
-            else if (value instanceof JsonNumber n)
-                builder.setNumberValue(n.value().doubleValue());
-            else if (value instanceof JsonString s) builder.setStringValue(s.value());
-            else if (value instanceof JsonObject obj)
-                builder.setStructValue((com.google.protobuf.Struct) structToMapMessage(obj));
-            else if (value instanceof JsonArray arr)
-                builder.setListValue((com.google.protobuf.ListValue) listToMessage(arr));
-            else builder.setStringValue(coerceString(value));
-            return builder.build();
-        }
-
-        private static Object structToMapMessage(JsonObject obj) {
-            com.google.protobuf.Struct.Builder builder = com.google.protobuf.Struct.newBuilder();
-            for (var entry : obj.value().entrySet()) {
-                builder.putFields(entry.getKey(), (com.google.protobuf.Value) buildValue(entry.getValue()));
-            }
-            return builder.build();
-        }
-
-        private static Object listToMessage(JsonArray array) {
-            com.google.protobuf.ListValue.Builder builder = com.google.protobuf.ListValue.newBuilder();
-            for (JsonValue v : array.value()) builder.addValues((com.google.protobuf.Value) buildValue(v));
-            return builder.build();
-        }
-
-        private static Object invokeAccessor(Object target, String method) {
-            try {
-                return target.getClass().getMethod(method).invoke(target);
-            } catch (Exception e) {
-                throw new IllegalStateException("Failed to invoke " + method + " on " + target.getClass(), e);
-            }
-        }
     }
 
     // -------- temporals
@@ -1829,6 +1255,10 @@ public final class Json {
         throw new IllegalStateException("Unsupported type: " + t);
     }
 
+    private static boolean typeBetween(Class<?> raw, Class<?> lower, Class<?> upper) {
+        return (lower == null || raw.isAssignableFrom(lower)) && (upper == null || upper.isAssignableFrom(raw));
+    }
+
     private static java.lang.reflect.Type collectionElementType(java.lang.reflect.Type t) {
         if (t instanceof ParameterizedType p) return canonicalize(p.getActualTypeArguments()[0]);
         if (t instanceof GenericArrayType ga) return canonicalize(ga.getGenericComponentType());
@@ -1869,5 +1299,399 @@ public final class Json {
     private static java.lang.reflect.Type erasureOf(TypeVariable<?> tv) {
         var uppers = tv.getBounds();
         return uppers.length == 0 ? Object.class : uppers[0];
+    }
+
+    // Protobuf support
+    private static final class ProtobufSupport {
+
+        private ProtobufSupport() {}
+
+        static boolean isProtobuf(Object o) {
+            return isMessageOrBuilder(o) || isEnum(o) || isSpecialType(o);
+        }
+
+        static boolean isSpecialType(Object o) {
+            return isSpecialTypeClass(o.getClass());
+        }
+
+        static boolean isEnum(Object o) {
+            return isEnumClass(o.getClass());
+        }
+
+        static boolean isMessageOrBuilder(Object o) {
+            return isMessageOrBuilderClass(o.getClass());
+        }
+
+        static boolean isSpecialTypeClass(Class<?> raw) {
+            return PROTOBUF_PRESENT && typeBetween(raw, null, ProtocolStringList.class);
+        }
+
+        static boolean isMessageOrBuilderClass(Class<?> raw) {
+            return PROTOBUF_PRESENT && typeBetween(raw, null, com.google.protobuf.MessageOrBuilder.class);
+        }
+
+        static boolean isMessageClass(Class<?> raw) {
+            return PROTOBUF_PRESENT && typeBetween(raw, null, com.google.protobuf.Message.class);
+        }
+
+        static boolean isMessageBuilderClass(Class<?> raw) {
+            return PROTOBUF_PRESENT && typeBetween(raw, null, com.google.protobuf.Message.Builder.class);
+        }
+
+        static boolean isEnumClass(Class<?> raw) {
+            return PROTOBUF_PRESENT && typeBetween(raw, null, com.google.protobuf.ProtocolMessageEnum.class);
+        }
+
+        static void writeMessageOrBuilder(JsonWriter writer, com.google.protobuf.MessageOrBuilder message) {
+            if (writeWellKnown(writer, message)) return;
+            writer.out.append('{');
+            boolean first = true;
+            for (var entry : message.getAllFields().entrySet()) {
+                var field = entry.getKey();
+                var v = entry.getValue();
+                if (!first) writer.out.append(',');
+                first = false;
+                writer.writeString(field.getJsonName());
+                writer.out.append(':');
+                writer.writeAny(v);
+            }
+            writer.out.append('}');
+        }
+
+        static void writeEnum(JsonWriter writer, com.google.protobuf.ProtocolMessageEnum e) {
+            if (e == com.google.protobuf.NullValue.NULL_VALUE) {
+                writer.out.append("null");
+            } else writer.writeString(e.getValueDescriptor().getName());
+        }
+
+        static Object parseProtobuf(JsonValue json, Class<?> raw) {
+            if (isMessageClass(raw)) return parseMessage(json, raw);
+            if (isMessageBuilderClass(raw)) return parseMessageBuilder(json, raw);
+            if (isEnumClass(raw)) return parseEnum(json, raw);
+            if (isSpecialTypeClass(raw)) return parseSpecialType(json, raw);
+            throw new IllegalStateException("Not a protobuf Message, Builder, or Enum class: " + raw.getName());
+        }
+
+        static Object parseMessage(JsonValue json, Class<?> raw) {
+            var builder = newBuilder(raw);
+            mergeIntoBuilder(json, builder);
+            return builder.build();
+        }
+
+        static Object parseMessageBuilder(JsonValue json, Class<?> raw) {
+            var builder = newBuilder(raw);
+            mergeIntoBuilder(json, builder);
+            return builder;
+        }
+
+        static boolean writeWellKnown(JsonWriter writer, com.google.protobuf.MessageOrBuilder message) {
+            if (message instanceof com.google.protobuf.TimestampOrBuilder t) {
+                writer.writeAny(
+                        Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.DurationOrBuilder d) {
+                writer.writeAny(Duration.ofSeconds(d.getSeconds(), d.getNanos()).toString());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.StringValueOrBuilder s) {
+                writer.writeAny(s.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.BytesValueOrBuilder b) {
+                writer.writeAny(Base64.getEncoder().encodeToString(b.getValue().toByteArray()));
+                return true;
+            }
+            if (message instanceof com.google.protobuf.BoolValueOrBuilder b) {
+                writer.writeAny(b.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.DoubleValueOrBuilder d) {
+                writer.writeAny(d.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.FloatValueOrBuilder f) {
+                writer.writeAny(f.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.Int32ValueOrBuilder i) {
+                writer.writeAny(i.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.UInt32ValueOrBuilder u32) {
+                writer.writeAny(u32.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.Int64ValueOrBuilder i64) {
+                writer.writeAny(i64.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.UInt64ValueOrBuilder u64) {
+                writer.writeAny(u64.getValue());
+                return true;
+            }
+            if (message instanceof com.google.protobuf.FieldMaskOrBuilder mask) {
+                writer.writeAny(String.join(",", mask.getPathsList()));
+                return true;
+            }
+            if (message instanceof com.google.protobuf.StructOrBuilder struct) {
+                writer.writeAny(structToJsonObject(struct));
+                return true;
+            }
+            if (message instanceof com.google.protobuf.ListValueOrBuilder list) {
+                writer.writeAny(listToJsonArray(list));
+                return true;
+            }
+            if (message instanceof com.google.protobuf.ValueOrBuilder value) {
+                writer.writeAny(valueToJsonValue(value));
+                return true;
+            }
+            if (message instanceof com.google.protobuf.EmptyOrBuilder) {
+                writer.writeAny(new JsonObject(Map.of()));
+                return true;
+            }
+            return false;
+        }
+
+        static JsonObject structToJsonObject(com.google.protobuf.StructOrBuilder struct) {
+            Map<String, JsonValue> map = new LinkedHashMap<>();
+            for (var entry : struct.getFieldsMap().entrySet()) {
+                map.put(entry.getKey(), valueToJsonValue(entry.getValue()));
+            }
+            return new JsonObject(map);
+        }
+
+        static JsonArray listToJsonArray(com.google.protobuf.ListValueOrBuilder listValue) {
+            List<JsonValue> list = new ArrayList<>();
+            for (com.google.protobuf.Value v : listValue.getValuesList()) list.add(valueToJsonValue(v));
+            return new JsonArray(list);
+        }
+
+        static JsonValue valueToJsonValue(com.google.protobuf.ValueOrBuilder value) {
+            return switch (value.getKindCase()) {
+                case NULL_VALUE -> new JsonNull();
+                case NUMBER_VALUE -> new JsonNumber(value.getNumberValue());
+                case STRING_VALUE -> new JsonString(value.getStringValue());
+                case BOOL_VALUE -> new JsonBoolean(value.getBoolValue());
+                case STRUCT_VALUE -> structToJsonObject(value.getStructValue());
+                case LIST_VALUE -> listToJsonArray(value.getListValue());
+                case KIND_NOT_SET -> new JsonNull(); // maybe should throw?
+            };
+        }
+
+        static void mergeIntoBuilder(JsonValue json, com.google.protobuf.Message.Builder builder) {
+            if (mergeWellKnown(json, builder)) return;
+
+            // special types here, like Date, DateTime
+
+            JsonObject object = expectObject(json);
+            var descriptor = builder.getDescriptorForType();
+            var fieldMap = buildFieldMap(descriptor);
+            for (var entry : object.value().entrySet()) {
+                var field = fieldMap.get(entry.getKey());
+                if (field != null) {
+                    var getterType = getterType(builder, field);
+                    Object v = fromJsonValue(entry.getValue(), getterType);
+                    builder.setField(field, v); // TODO(Freeman): repeated?
+                }
+            }
+        }
+
+        static java.lang.reflect.Type getterType(
+                com.google.protobuf.Message.Builder builder, com.google.protobuf.Descriptors.FieldDescriptor field) {
+            var snake = toCamelCase(field.getName());
+            String getterMethodName;
+            if (field.isMapField()) {
+                getterMethodName = "get" + Character.toUpperCase(snake.charAt(0)) + snake.substring(1) + "Map";
+            } else if (field.isRepeated()) {
+                getterMethodName = "get" + Character.toUpperCase(snake.charAt(0)) + snake.substring(1) + "List";
+            } else {
+                getterMethodName = "get" + Character.toUpperCase(snake.charAt(0)) + snake.substring(1);
+            }
+            try {
+                var m = builder.getClass().getMethod(getterMethodName);
+                return m.getGenericReturnType();
+            } catch (NoSuchMethodException e) {
+                throw new IllegalStateException(
+                        "Cannot find getter " + getterMethodName + " on "
+                                + builder.getClass().getName(),
+                        e);
+            }
+        }
+
+        static boolean mergeWellKnown(JsonValue json, com.google.protobuf.Message.Builder builder) {
+            if (builder instanceof com.google.protobuf.Timestamp.Builder timestamp) {
+                Instant instant = fromJsonValue(json, Instant.class);
+                timestamp.setSeconds(instant.getEpochSecond());
+                timestamp.setNanos(instant.getNano());
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.Duration.Builder duration) {
+                Duration dur = fromJsonValue(json, Duration.class);
+                duration.setSeconds(dur.getSeconds());
+                duration.setNanos(dur.getNano());
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.StringValue.Builder stringValue) {
+                stringValue.setValue(fromJsonValue(json, String.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.BytesValue.Builder bytesValue) {
+                byte[] bytes = Base64.getDecoder().decode((String) fromJsonValue(json, String.class));
+                bytesValue.setValue(com.google.protobuf.ByteString.copyFrom(bytes));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.BoolValue.Builder boolValue) {
+                boolValue.setValue(fromJsonValue(json, Boolean.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.DoubleValue.Builder doubleValue) {
+                doubleValue.setValue(fromJsonValue(json, Double.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.FloatValue.Builder floatValue) {
+                floatValue.setValue(fromJsonValue(json, Float.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.Int32Value.Builder int32Value) {
+                int32Value.setValue(fromJsonValue(json, Integer.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.UInt32Value.Builder uint32Value) {
+                uint32Value.setValue(fromJsonValue(json, Integer.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.Int64Value.Builder int64Value) {
+                int64Value.setValue(fromJsonValue(json, Long.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.UInt64Value.Builder uint64Value) {
+                uint64Value.setValue(fromJsonValue(json, Long.class));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.FieldMask.Builder fieldMask) {
+                String str = fromJsonValue(json, String.class);
+                for (var s : str.split(",")) fieldMask.addPaths(s);
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.Struct.Builder struct) {
+                for (var entry : expectObject(json).value().entrySet()) {
+                    struct.putFields(entry.getKey(), toValue(entry.getValue()));
+                }
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.ListValue.Builder list) {
+                var ja = json instanceof JsonArray ? (JsonArray) json : new JsonArray(List.of(json));
+                for (var v : ja.value()) list.addValues(toValue(v));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.Value.Builder value) {
+                value.mergeFrom(toValue(json));
+                return true;
+            }
+            if (builder instanceof com.google.protobuf.Empty.Builder) {
+                return true;
+            }
+            return false;
+        }
+
+        static Object parseEnum(JsonValue jv, Class<?> raw) {
+            if (raw == com.google.protobuf.NullValue.class) { // special case
+                if (jv instanceof JsonNull) return com.google.protobuf.NullValue.NULL_VALUE;
+                if (jv instanceof JsonString js) {
+                    if (js.value().equalsIgnoreCase(com.google.protobuf.NullValue.NULL_VALUE.name()))
+                        return com.google.protobuf.NullValue.NULL_VALUE;
+                }
+                if (jv instanceof JsonNumber jn) {
+                    if (jn.value().intValue() == com.google.protobuf.NullValue.NULL_VALUE.getNumber())
+                        return com.google.protobuf.NullValue.NULL_VALUE;
+                }
+                throw new IllegalStateException("Cannot convert " + jv.getClass() + " to NullValue");
+            }
+            if (!(jv instanceof JsonString) && !(jv instanceof JsonNumber)) {
+                jv = new JsonString(coerceString(jv));
+            }
+            if (jv instanceof JsonString s) {
+                for (Object ec : raw.getEnumConstants())
+                    if (((Enum<?>) ec).name().equalsIgnoreCase(s.value())) return ec;
+                throw new IllegalStateException("No enum constant " + raw.getName() + "." + s.value());
+            }
+            if (jv instanceof JsonNumber n) {
+                var i = n.value().intValue();
+                for (Object constant : raw.getEnumConstants()) {
+                    var pm = (com.google.protobuf.ProtocolMessageEnum) constant;
+                    if (i == -1 && Objects.equals(pm.getValueDescriptor().getName(), "UNRECOGNIZED")) return pm;
+                    if (pm.getNumber() == i) return pm;
+                }
+                throw new IllegalStateException("No enum constant " + raw.getName() + " with number " + i);
+            }
+            throw new IllegalStateException(
+                    "Cannot coerce " + jv.getClass().getSimpleName() + " to enum " + raw.getName());
+        }
+
+        static Object parseSpecialType(JsonValue jv, Class<?> raw) {
+            if (typeBetween(raw, LazyStringArrayList.class, ProtocolStringList.class)) {
+                List<String> list = fromJsonValue(jv, new Type<List<String>>() {}.getType());
+                return new LazyStringArrayList(list);
+            }
+            throw new IllegalStateException("Not a supported type: " + raw.getName());
+        }
+
+        static com.google.protobuf.Message.Builder newBuilder(Class<?> raw) {
+            if (isMessageBuilderClass(raw)) {
+                var enclosing = raw.getEnclosingClass();
+                if (enclosing != null && isMessageClass(enclosing)) return newBuilder(enclosing);
+            }
+            try {
+                var method = raw.getMethod("newBuilder");
+                return (com.google.protobuf.Message.Builder) method.invoke(null);
+            } catch (Exception e) {
+                throw new IllegalStateException("Cannot create protobuf builder for " + raw.getName(), e);
+            }
+        }
+
+        static Map<String, com.google.protobuf.Descriptors.FieldDescriptor> buildFieldMap(
+                com.google.protobuf.Descriptors.Descriptor descriptor) {
+            Map<String, com.google.protobuf.Descriptors.FieldDescriptor> map = new LinkedHashMap<>();
+            for (var field : descriptor.getFields()) {
+                map.put(field.getName(), field);
+                String snake = toSnakeCase(field.getName());
+                if (!snake.equals(field.getName())) map.put(snake, field);
+                String camel = toCamelCase(field.getName());
+                if (!camel.equals(field.getName())) map.put(camel, field);
+                if (!Objects.equals(field.getName(), field.getJsonName())) {
+                    map.put(field.getJsonName(), field);
+                    String snakeJson = toSnakeCase(field.getJsonName());
+                    if (!snakeJson.equals(field.getJsonName())) map.put(snakeJson, field);
+                    String camelJson = toCamelCase(field.getJsonName());
+                    if (!camelJson.equals(field.getJsonName())) map.put(camelJson, field);
+                }
+            }
+            return map;
+        }
+
+        static JsonObject expectObject(JsonValue value) {
+            if (value instanceof JsonObject obj) return obj;
+            throw new IllegalStateException("Expected JSON object");
+        }
+
+        static com.google.protobuf.Value toValue(JsonValue value) {
+            var builder = com.google.protobuf.Value.newBuilder();
+            if (value instanceof JsonNull) builder.setNullValue(com.google.protobuf.NullValue.NULL_VALUE);
+            else if (value instanceof JsonBoolean b) builder.setBoolValue(b.value());
+            else if (value instanceof JsonNumber n)
+                builder.setNumberValue(n.value().doubleValue());
+            else if (value instanceof JsonString s) builder.setStringValue(s.value());
+            else if (value instanceof JsonObject o) {
+                var sb = com.google.protobuf.Struct.newBuilder();
+                mergeIntoBuilder(o, sb);
+                builder.setStructValue(sb.build());
+            } else if (value instanceof JsonArray a) {
+                var lb = com.google.protobuf.ListValue.newBuilder();
+                mergeIntoBuilder(a, lb);
+                builder.setListValue(lb.build());
+            }
+            return builder.build();
+        }
     }
 }
