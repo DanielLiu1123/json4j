@@ -18,15 +18,19 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 import json4j.user.Hobby;
 import json4j.user.User;
 import lombok.Data;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -56,6 +60,7 @@ class JsonTest {
                     Arguments.of(null, "null"),
                     Arguments.of("hello", "\"hello\""),
                     Arguments.of("", "\"\""),
+                    Arguments.of(Stream.of(Optional.empty(), Optional.of(1), Optional.of("str"), Optional.of(true), Optional.of(new RecordPerson("Alice", 30, null))), "[null,1,\"str\",true,{\"name\":\"Alice\",\"age\":30,\"birthDate\":null}]"),
                     Arguments.of(LocalDate.parse("2023-01-01"), "\"2023-01-01\""),
                     Arguments.of(List.of(1, 2, 3), "[1,2,3]"),
                     Arguments.of(Map.of("key", "value"), "{\"key\":\"value\"}"),
@@ -101,6 +106,7 @@ class JsonTest {
                     Arguments.of("false", Json.Type.of(Boolean.class), false),
                     Arguments.of("null", new Json.Type<RecordPerson>() {}, null),
                     Arguments.of("null", new Json.Type<String>() {}, null),
+                    Arguments.of("null", new Json.Type<Optional<?>>() {}, Optional.empty()), // never null for Optional
                     Arguments.of("[]", new Json.Type<List<RecordPerson>>() {}, List.of()),
                     Arguments.of("{}", new Json.Type<Map<String, RecordPerson>>() {}, Map.of()),
                     Arguments.of("\"2025-10-10\"", new Json.Type<LocalDate>() {}, LocalDate.parse("2025-10-10")),
@@ -179,6 +185,29 @@ class JsonTest {
         @MethodSource("parseArgs")
         void parse(String input, Json.Type<?> type, Object expected) {
             assertThat(Json.parse(input, type)).isEqualTo(expected);
+        }
+
+        @Test
+        void parseStream() {
+            var input = "[null,1,\"str\",true,{\"name\":\"Alice\",\"age\":30,\"birthDate\":null}]";
+            var expected = new ArrayList<>() {
+                {
+                    add(null);
+                    add(1);
+                    add("str");
+                    add(true);
+                    add(new LinkedHashMap<>() {
+                        {
+                            put("name", "Alice");
+                            put("age", 30);
+                            put("birthDate", null);
+                        }
+                    });
+                }
+            };
+
+            var actual = Json.parse(input, new Json.Type<Stream<Object>>() {}).toList();
+            assertThat(actual).isEqualTo(expected);
         }
 
         private static Stream<Arguments> nullCannotParseToPrimitiveArgs() {

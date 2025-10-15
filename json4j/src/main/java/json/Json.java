@@ -33,7 +33,9 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.ServiceLoader;
+import java.util.Spliterators;
 import java.util.Stack;
 import java.util.TreeMap;
 import java.util.Vector;
@@ -41,6 +43,11 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.BaseStream;
+import java.util.stream.DoubleStream;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 /**
  * Minimal, standard-first JSON writer and parser.
@@ -590,12 +597,21 @@ public final class Json {
                 writeNumber(n);
                 return;
             }
+            if (o instanceof Optional<?> optional) {
+                if (optional.isEmpty()) out.append("null");
+                else write(optional.get());
+                return;
+            }
             if (o.getClass().isArray()) {
                 writeArray(o);
                 return;
             }
             if (o instanceof Iterable<?> it) {
                 writeIterable(it);
+                return;
+            }
+            if (o instanceof BaseStream<?, ?> stream) {
+                writeStream(stream);
                 return;
             }
             if (o instanceof Map<?, ?> m) {
@@ -647,6 +663,20 @@ public final class Json {
                 return;
             }
             writeBean(o);
+        }
+
+        private void writeStream(BaseStream<?, ?> stream) {
+            out.append('[');
+            boolean first = true;
+            try (var s = stream) {
+                var it = Spliterators.iterator(s.spliterator());
+                while (it.hasNext()) {
+                    if (!first) out.append(',');
+                    first = false;
+                    write(it.next());
+                }
+            }
+            out.append(']');
         }
 
         void writeJsonValue(JsonValue v) {
@@ -748,12 +778,16 @@ public final class Json {
             out.append('{');
             boolean first = true;
             for (var c : r.getClass().getRecordComponents()) {
-                if (!first) out.append(',');
-                first = false;
-                writeString(c.getName());
-                out.append(':');
                 try {
                     Object v = c.getAccessor().invoke(r);
+                    if (v instanceof Optional<?> optional) {
+                        if (optional.isEmpty()) continue;
+                        v = optional.get();
+                    }
+                    if (!first) out.append(',');
+                    first = false;
+                    writeString(c.getName());
+                    out.append(':');
                     write(v);
                 } catch (Exception e) {
                     throw new IllegalStateException("Record accessor failed: " + c.getName(), e);
@@ -772,6 +806,10 @@ public final class Json {
                     var read = pd.getReadMethod();
                     if (read == null) continue;
                     Object v = read.invoke(bean);
+                    if (v instanceof Optional<?> optional) {
+                        if (optional.isEmpty()) continue;
+                        v = optional.get();
+                    }
                     if (!first) out.append(',');
                     first = false;
                     writeString(pd.getName());
@@ -869,35 +907,50 @@ public final class Json {
             return (T) coerceTemporal(jv, raw);
         }
 
+        // 2.7 optional: wrap the inner type
+        if (raw == Optional.class) {
+            return (T) coerceOptional(jv, targetType);
+        }
+
         // 3) Structured targets (LOOSE)
 
         // 3.1 arrays: if non-array provided, wrap single element
         if (raw.isArray()) {
             JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-            return (T) arrayFromJson(ja, raw.getComponentType());
+            return (T) coerceArray(ja, raw.getComponentType());
         }
 
-        // 3.2 collections: if non-array provided, wrap single element
+        // 3.2 Collection: if non-array provided, wrap single element
         if (Iterable.class.isAssignableFrom(raw)) {
             JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-            return (T) collectionFromJson(ja, targetType, raw);
+            return (T) coerceIterable(ja, targetType);
         }
 
-        // 3.3 maps: expect object; (keys are coerced loosely inside mapFromJson via coerceMapKey)
-        if (Map.class.isAssignableFrom(raw)) {
-            return (T) mapFromJson(expectObject(jv, targetType), targetType, raw);
+        // 3.3 Stream
+        if (BaseStream.class.isAssignableFrom(raw)) {
+            JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
+            return (T) coerceStream(ja, targetType);
         }
 
-        // 4) POJOs: record or bean; require object
+        // Must JsonObject here!
         JsonObject jo = expectObject(jv, targetType);
-        if (raw.isRecord()) return (T) recordFromJson(jo, raw);
-        return (T) beanFromJson(jo, raw);
+
+        // 3.4 Map
+        if (Map.class.isAssignableFrom(raw)) {
+            return (T) coerceMap(jo, targetType);
+        }
+
+        // 3.5 Record
+        if (raw.isRecord()) return (T) coerceRecord(jo, raw);
+
+        // 3.6 Java bean
+        return (T) coerceBean(jo, raw);
     }
 
-    static Object mapFromJson(JsonObject jo, java.lang.reflect.Type type, Class<?> raw) {
+    static Object coerceMap(JsonObject jo, java.lang.reflect.Type type) {
         var keyType = mapKeyType(type);
         var valueType = mapValueType(type);
-        var map = createMap(raw, jo.value().size());
+        var map = createMap(raw(type), jo.value().size());
         for (var en : jo.value().entrySet()) {
             Object key = fromJsonValue(new JsonString(en.getKey()), keyType);
             Object val = fromJsonValue(en.getValue(), valueType);
@@ -931,7 +984,7 @@ public final class Json {
         return (n < 0) ? 1 : (n >= 1 << 30) ? 1 << 30 : n + 1;
     }
 
-    static Object recordFromJson(JsonObject jo, Class<?> raw) {
+    static Object coerceRecord(JsonObject jo, Class<?> raw) {
         try {
             var components = raw.getRecordComponents();
             Class<?>[] ctorTypes =
@@ -952,7 +1005,7 @@ public final class Json {
         }
     }
 
-    static Object beanFromJson(JsonObject jo, Class<?> raw) {
+    static Object coerceBean(JsonObject jo, Class<?> raw) {
         Object bean = constructBean(raw);
         try {
             var bi = Introspector.getBeanInfo(raw);
@@ -1063,7 +1116,7 @@ public final class Json {
         return sb.toString();
     }
 
-    static Object arrayFromJson(JsonArray ja, Class<?> component) {
+    static Object coerceArray(JsonArray ja, Class<?> component) {
         int len = ja.value().size();
         Object arr = Array.newInstance(component, len);
         for (int i = 0; i < len; i++) {
@@ -1072,8 +1125,8 @@ public final class Json {
         return arr;
     }
 
-    static Object collectionFromJson(JsonArray ja, java.lang.reflect.Type type, Class<?> raw) {
-        var coll = createCollection(raw, ja.value().size());
+    static Object coerceIterable(JsonArray ja, java.lang.reflect.Type type) {
+        var coll = createCollection(raw(type), ja.value().size());
         var elemType = collectionElementType(type);
         for (var v : ja.value()) coll.add(fromJsonValue(v, elemType));
         return coll;
@@ -1127,6 +1180,7 @@ public final class Json {
     }
 
     static Object nullValueFor(Class<?> raw) {
+        if (raw == Optional.class) return Optional.empty();
         if (raw.isPrimitive()) throw new IllegalStateException("Cannot assign null to primitive type " + raw.getName());
         return null;
     }
@@ -1140,6 +1194,7 @@ public final class Json {
         if (t == float.class) return 0f;
         if (t == double.class) return 0d;
         if (t == char.class) return '\0';
+        if (t == Optional.class) return Optional.empty(); // null Optional joke :)
         return null;
     }
 
@@ -1272,6 +1327,30 @@ public final class Json {
                         .toOffsetDateTime();
         }
         throw new IllegalStateException("Cannot coerce " + jv.getClass().getSimpleName() + " to " + raw.getName());
+    }
+
+    static Object coerceOptional(JsonValue jv, java.lang.reflect.Type targetType) {
+        if (!(targetType instanceof ParameterizedType p)) {
+            throw new IllegalStateException("Optional type must be parameterized: " + targetType);
+        }
+        if (jv instanceof JsonNull) return Optional.empty();
+        return Optional.ofNullable(fromJsonValue(jv, p.getActualTypeArguments()[0]));
+    }
+
+    static Object coerceStream(JsonArray ja, java.lang.reflect.Type targetType) {
+        if (!(targetType instanceof ParameterizedType p)) {
+            throw new IllegalStateException("Stream type must be parameterized: " + targetType);
+        }
+        var elemType = p.getActualTypeArguments()[0];
+        var list = new ArrayList<>();
+        for (var e : ja.value()) list.add(fromJsonValue(e, elemType));
+        Class<?> raw = raw(targetType);
+        if (typeBetween(raw, Stream.class, BaseStream.class)) return list.stream();
+        if (typeBetween(raw, IntStream.class, null)) return list.stream().mapToInt(e -> ((Number) e).intValue());
+        if (typeBetween(raw, LongStream.class, null)) return list.stream().mapToLong(e -> ((Number) e).longValue());
+        if (typeBetween(raw, DoubleStream.class, null))
+            return list.stream().mapToDouble(e -> ((Number) e).doubleValue());
+        throw new IllegalStateException("Unsupported Stream type: " + raw.getName());
     }
 
     // ============================================================
