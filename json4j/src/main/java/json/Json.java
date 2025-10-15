@@ -74,7 +74,7 @@ public final class Json {
      */
     public static String stringify(Object o) {
         StringBuilder sb = new StringBuilder();
-        new JsonWriter(sb).write(o);
+        new Writer(sb).write(o);
         return sb.toString();
     }
 
@@ -143,7 +143,7 @@ public final class Json {
     public interface Codec {
         boolean canSerialize(Object o);
 
-        void serialize(JsonWriter writer, Object o);
+        void serialize(Writer writer, Object o);
 
         boolean canDeserialize(JsonValue jv, java.lang.reflect.Type targetType);
 
@@ -549,13 +549,13 @@ public final class Json {
     }
 
     // ============================================================
-    // JsonWriter (correct escaping, faster stringify)
+    // Writer (correct escaping, faster stringify)
     // ============================================================
 
-    public static final class JsonWriter {
+    public static final class Writer {
         final StringBuilder out;
 
-        JsonWriter(StringBuilder sb) {
+        public Writer(StringBuilder sb) {
             this.out = sb;
         }
 

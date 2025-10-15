@@ -75,7 +75,7 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     @Override
-    public void serialize(Json.JsonWriter writer, Object o) {
+    public void serialize(Json.Writer writer, Object o) {
         writeProtobuf(writer, o);
     }
 
@@ -130,7 +130,7 @@ public final class ProtobufCodec implements Json.Codec {
                 || typeBetween(raw, null, Descriptors.EnumValueDescriptor.class);
     }
 
-    static void writeProtobuf(Json.JsonWriter writer, Object o) {
+    static void writeProtobuf(Json.Writer writer, Object o) {
         if (isMessageOrBuilder(o)) writeMessageOrBuilder(writer, (MessageOrBuilder) o);
         else if (isEnum(o)) writeEnum(writer, o);
         else if (isSpecialType(o)) writeSpecialType(writer, o);
@@ -139,7 +139,7 @@ public final class ProtobufCodec implements Json.Codec {
                     + o.getClass().getName());
     }
 
-    static void writeMessageOrBuilder(Json.JsonWriter writer, MessageOrBuilder message) {
+    static void writeMessageOrBuilder(Json.Writer writer, MessageOrBuilder message) {
         if (writeWellKnown(writer, message)) return;
         writer.out.append('{');
         boolean first = true;
@@ -171,7 +171,7 @@ public final class ProtobufCodec implements Json.Codec {
         return false;
     }
 
-    static void writeEnum(Json.JsonWriter writer, Object e) {
+    static void writeEnum(Json.Writer writer, Object e) {
         if (!(e instanceof ProtocolMessageEnum) && !(e instanceof Descriptors.EnumValueDescriptor)) {
             throw new IllegalStateException(
                     "Not a protobuf Enum: " + e.getClass().getName());
@@ -187,7 +187,7 @@ public final class ProtobufCodec implements Json.Codec {
         }
     }
 
-    static void writeSpecialType(Json.JsonWriter writer, Object o) {
+    static void writeSpecialType(Json.Writer writer, Object o) {
         if (o instanceof ProtocolStringList list) {
             writer.write(List.copyOf(list));
         } else {
@@ -216,7 +216,7 @@ public final class ProtobufCodec implements Json.Codec {
         return builder;
     }
 
-    static boolean writeWellKnown(Json.JsonWriter writer, MessageOrBuilder message) {
+    static boolean writeWellKnown(Json.Writer writer, MessageOrBuilder message) {
         if (message instanceof TimestampOrBuilder t) {
             writer.write(Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
             return true;
