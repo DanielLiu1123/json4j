@@ -1180,7 +1180,6 @@ public final class Json {
     }
 
     static Object nullValueFor(Class<?> raw) {
-        if (raw == Optional.class) return Optional.empty();
         if (raw.isPrimitive()) throw new IllegalStateException("Cannot assign null to primitive type " + raw.getName());
         return null;
     }

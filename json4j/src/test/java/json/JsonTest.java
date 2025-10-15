@@ -92,6 +92,27 @@ class JsonTest {
         void stringify(Object input, String expected) {
             assertThat(Json.stringify(input)).isEqualTo(expected);
         }
+
+        @Test
+        void stringifyOptional() {
+            record Foo(Optional<String> name, Optional<Integer> age) {}
+
+            var table = new Object[][] {
+                {new Foo(Optional.of("Alice"), Optional.of(30)), "{\"name\":\"Alice\",\"age\":30}"},
+                {new Foo(Optional.of("Bob"), Optional.empty()), "{\"name\":\"Bob\"}"},
+                {new Foo(Optional.empty(), Optional.of(25)), "{\"age\":25}"},
+                {new Foo(Optional.empty(), Optional.empty()), "{}"},
+                {new Foo(null, Optional.empty()), "{\"name\":null}"},
+                {new Foo(Optional.empty(), null), "{\"age\":null}"}
+            };
+
+            for (var row : table) {
+                var input = (Foo) row[0];
+                var expected = (String) row[1];
+                var actual = Json.stringify(input);
+                assertThat(actual).isEqualTo(expected);
+            }
+        }
     }
 
     @Nested
@@ -106,7 +127,7 @@ class JsonTest {
                     Arguments.of("false", Json.Type.of(Boolean.class), false),
                     Arguments.of("null", new Json.Type<RecordPerson>() {}, null),
                     Arguments.of("null", new Json.Type<String>() {}, null),
-                    Arguments.of("null", new Json.Type<Optional<?>>() {}, Optional.empty()), // never null for Optional
+                    Arguments.of("null", new Json.Type<Optional<?>>() {}, null),
                     Arguments.of("[]", new Json.Type<List<RecordPerson>>() {}, List.of()),
                     Arguments.of("{}", new Json.Type<Map<String, RecordPerson>>() {}, Map.of()),
                     Arguments.of("\"2025-10-10\"", new Json.Type<LocalDate>() {}, LocalDate.parse("2025-10-10")),
@@ -208,6 +229,26 @@ class JsonTest {
 
             var actual = Json.parse(input, new Json.Type<Stream<Object>>() {}).toList();
             assertThat(actual).isEqualTo(expected);
+        }
+
+        @Test
+        void parseOptional() {
+            record Foo(Optional<String> name, Optional<Integer> age) {}
+
+            var table = new Object[][] {
+                {"{\"name\":\"Alice\",\"age\":30}", new Foo(Optional.of("Alice"), Optional.of(30))},
+                {"{\"name\":\"Bob\"}", new Foo(Optional.of("Bob"), Optional.empty())},
+                {"{\"age\":25}", new Foo(Optional.empty(), Optional.of(25))},
+                {"{}", new Foo(Optional.empty(), Optional.empty())},
+                {"{\"name\":null,\"age\":null}", new Foo(null, null)}
+            };
+
+            for (var row : table) {
+                var input = (String) row[0];
+                var expected = (Foo) row[1];
+                var actual = Json.parse(input, new Json.Type<Foo>() {});
+                assertThat(actual).isEqualTo(expected);
+            }
         }
 
         private static Stream<Arguments> nullCannotParseToPrimitiveArgs() {
