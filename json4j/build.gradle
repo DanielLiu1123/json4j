@@ -1,4 +1,4 @@
-description = "json4j"
+description = "Minimal, standard-first JSON library"
 
 dependencies {
     optional("com.google.protobuf:protobuf-java:${protobufVersion}")
