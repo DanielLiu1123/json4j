@@ -174,6 +174,22 @@ public final class Json {
     record JsonString(String value) implements JsonValue {}
 
     // ============================================================
+    // Extension point
+    // ============================================================
+
+    interface Serializer {
+        boolean canSerialize(Object o);
+
+        String serialize(Object o);
+    }
+
+    interface Deserializer {
+        boolean canDeserialize(JsonValue jv, java.lang.reflect.Type targetType);
+
+        Object deserialize(JsonValue jv, java.lang.reflect.Type targetType);
+    }
+
+    // ============================================================
     // Type token
     // ============================================================
 
