@@ -271,13 +271,15 @@ class JsonTest {
             };
             // @spotless:on
 
-            for (var row : table) {
+            assertAll(IntStream.range(0, table.length).mapToObj(i -> () -> {
+                var row = table[i];
                 var input = (String) row[0];
                 var type = (Json.Type<?>) row[1];
                 assertThatCode(() -> Json.parse(input, type))
+                        .as("Case %d: input=%s, type=%s", i, input, type)
                         .isInstanceOf(Json.ConversionException.class)
                         .hasMessageContaining("Cannot assign null to primitive");
-            }
+            }));
         }
 
         @Test
@@ -297,13 +299,15 @@ class JsonTest {
             };
             // @spotless:on
 
-            for (var row : table) {
+            assertAll(IntStream.range(0, table.length).mapToObj(i -> () -> {
+                var row = table[i];
                 var input = (String) row[0];
                 var containsMessage = (String) row[1];
                 assertThatCode(() -> Json.parse(input, Object.class))
+                        .as("Case %d: input=%s", i, input)
                         .isInstanceOf(Json.SyntaxException.class)
                         .hasMessageContaining(containsMessage);
-            }
+            }));
         }
     }
 }
