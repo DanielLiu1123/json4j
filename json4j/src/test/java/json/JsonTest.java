@@ -283,7 +283,7 @@ class JsonTest {
         }
 
         @Test
-        void invalidJson() {
+        void syntaxException() {
             // @spotless:off
             var table = new Object[][] {
                     {"\"1.5", "Unterminated string literal at line 1, column 5"},
