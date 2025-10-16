@@ -135,8 +135,10 @@ public final class ProtobufCodec implements Json.Codec {
         else if (isEnum(o)) writeEnum(writer, o);
         else if (isSpecialType(o)) writeSpecialType(writer, o);
         else
-            throw new IllegalStateException("Not a protobuf Message, Builder, Enum, or special type: "
-                    + o.getClass().getName());
+            throw new Json.WriteException(
+                    "Not a protobuf Message, Builder, Enum, or special type: "
+                            + o.getClass().getName(),
+                    null);
     }
 
     static void writeMessageOrBuilder(Json.Writer writer, MessageOrBuilder message) {
@@ -173,8 +175,7 @@ public final class ProtobufCodec implements Json.Codec {
 
     static void writeEnum(Json.Writer writer, Object e) {
         if (!(e instanceof ProtocolMessageEnum) && !(e instanceof Descriptors.EnumValueDescriptor)) {
-            throw new IllegalStateException(
-                    "Not a protobuf Enum: " + e.getClass().getName());
+            throw new Json.WriteException("Not a protobuf Enum: " + e.getClass().getName());
         }
 
         Descriptors.EnumValueDescriptor evd =
@@ -191,7 +192,7 @@ public final class ProtobufCodec implements Json.Codec {
         if (o instanceof ProtocolStringList list) {
             writer.write(List.copyOf(list));
         } else {
-            throw new IllegalStateException(
+            throw new Json.WriteException(
                     "Unsupported special protobuf type: " + o.getClass().getName());
         }
     }
@@ -201,7 +202,7 @@ public final class ProtobufCodec implements Json.Codec {
         if (isMessageBuilderClass(raw)) return parseMessageBuilder(json, raw);
         if (isEnumClass(raw)) return parseEnum(json, raw);
         if (isSpecialTypeClass(raw)) return parseSpecialType(json, raw);
-        throw new IllegalStateException("Not a protobuf Message, Builder, or Enum class: " + raw.getName());
+        throw new Json.ConversionException("Not a protobuf Message, Builder, or Enum class: " + raw.getName());
     }
 
     static Object parseMessage(Json.JsonValue json, Class<?> raw) {
@@ -332,8 +333,8 @@ public final class ProtobufCodec implements Json.Codec {
                         setterMethod(builder, field, raw(getterType)).invoke(builder, v);
                     }
                 } catch (Exception e) {
-                    throw new IllegalStateException(
-                            "Cannot set field " + field.getFullName() + " on builder "
+                    throw new Json.ConversionException(
+                            "Cannot set field '" + field.getFullName() + "' on builder "
                                     + builder.getClass().getName(),
                             e);
                 }
@@ -347,8 +348,8 @@ public final class ProtobufCodec implements Json.Codec {
             var m = builder.getClass().getMethod(getterMethodName);
             return m.getGenericReturnType();
         } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(
-                    "Cannot find getter " + getterMethodName + " on "
+            throw new Json.ConversionException(
+                    "Cannot find getter method '" + getterMethodName + "' on "
                             + builder.getClass().getName(),
                     e);
         }
@@ -360,8 +361,10 @@ public final class ProtobufCodec implements Json.Codec {
         try {
             return builder.getClass().getMethod(setter, params);
         } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(
-                    "Cannot find " + setter + " method on " + builder.getClass().getName(), e);
+            throw new Json.ConversionException(
+                    "Cannot find setter method '" + setter + "' on "
+                            + builder.getClass().getName(),
+                    e);
         }
     }
 
@@ -371,8 +374,10 @@ public final class ProtobufCodec implements Json.Codec {
         try {
             return builder.getClass().getMethod(adder, params);
         } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(
-                    "Cannot find " + adder + " method on " + builder.getClass().getName(), e);
+            throw new Json.ConversionException(
+                    "Cannot find addAll method '" + adder + "' on "
+                            + builder.getClass().getName(),
+                    e);
         }
     }
 
@@ -382,8 +387,10 @@ public final class ProtobufCodec implements Json.Codec {
         try {
             return builder.getClass().getMethod(putter, params);
         } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(
-                    "Cannot find " + putter + " method on " + builder.getClass().getName(), e);
+            throw new Json.ConversionException(
+                    "Cannot find putAll method '" + putter + "' on "
+                            + builder.getClass().getName(),
+                    e);
         }
     }
 
@@ -402,12 +409,20 @@ public final class ProtobufCodec implements Json.Codec {
 
     static Object invokeGetter(MessageOrBuilder messageOrBuilder, Descriptors.FieldDescriptor field) {
         var getter = getterMethodName(field);
+        Method method;
         try {
-            var m = messageOrBuilder.getClass().getMethod(getter);
-            return m.invoke(messageOrBuilder);
+            method = messageOrBuilder.getClass().getMethod(getter);
+        } catch (NoSuchMethodException e) {
+            throw new Json.ConversionException(
+                    "Cannot find getter method '" + getter + "' on "
+                            + messageOrBuilder.getClass().getName(),
+                    e);
+        }
+        try {
+            return method.invoke(messageOrBuilder);
         } catch (Exception e) {
-            throw new IllegalStateException(
-                    "Cannot invoke getter " + getter + " on "
+            throw new Json.ConversionException(
+                    "Cannot invoke getter method '" + getter + "' on "
                             + messageOrBuilder.getClass().getName(),
                     e);
         }
@@ -491,7 +506,7 @@ public final class ProtobufCodec implements Json.Codec {
 
     static Object parseEnum(Json.JsonValue jv, Class<?> raw) {
         if (!typeBetween(raw, null, Enum.class))
-            throw new IllegalStateException("Not a protobuf Enum class: " + raw.getName());
+            throw new Json.ConversionException("Not a protobuf Enum class: " + raw.getName());
         if (raw == NullValue.class) { // special case
             if (jv instanceof Json.JsonNull) return NullValue.NULL_VALUE;
             if (jv instanceof Json.JsonString js) {
@@ -500,14 +515,14 @@ public final class ProtobufCodec implements Json.Codec {
             if (jv instanceof Json.JsonNumber jn) {
                 if (jn.value().intValue() == NullValue.NULL_VALUE.getNumber()) return NullValue.NULL_VALUE;
             }
-            throw new IllegalStateException("Cannot convert " + jv.getClass() + " to NullValue");
+            throw new Json.ConversionException("Cannot convert " + jv.getClass() + " to NullValue");
         }
         if (!(jv instanceof Json.JsonString) && !(jv instanceof Json.JsonNumber)) {
             jv = new Json.JsonString(coerceString(jv));
         }
         if (jv instanceof Json.JsonString s) {
             for (Object ec : raw.getEnumConstants()) if (((Enum<?>) ec).name().equalsIgnoreCase(s.value())) return ec;
-            throw new IllegalStateException("No enum constant " + raw.getName() + "." + s.value());
+            throw new Json.ConversionException("No enum constant " + raw.getName() + "." + s.value());
         }
         if (jv instanceof Json.JsonNumber n) {
             var i = n.value().intValue();
@@ -516,9 +531,10 @@ public final class ProtobufCodec implements Json.Codec {
                 if (i == -1 && Objects.equals(pm.getValueDescriptor().getName(), "UNRECOGNIZED")) return pm;
                 if (pm.getNumber() == i) return pm;
             }
-            throw new IllegalStateException("No enum constant " + raw.getName() + " with number " + i);
+            throw new Json.ConversionException("No enum constant " + raw.getName() + " with number " + i);
         }
-        throw new IllegalStateException("Cannot coerce " + jv.getClass().getSimpleName() + " to enum " + raw.getName());
+        throw new Json.ConversionException(
+                "Cannot coerce " + jv.getClass().getSimpleName() + " to enum " + raw.getName());
     }
 
     static Object parseSpecialType(Json.JsonValue jv, Class<?> raw) {
@@ -526,19 +542,20 @@ public final class ProtobufCodec implements Json.Codec {
             List<String> list = fromJsonValue(jv, new Json.Type<List<String>>() {}.getType());
             return new LazyStringArrayList(list);
         }
-        throw new IllegalStateException("Not a supported type: " + raw.getName());
+        throw new Json.ConversionException("Not a supported type: " + raw.getName());
     }
 
     static Message.Builder newBuilder(Class<?> raw) {
+        Class<?> targetClass = raw;
         if (isMessageBuilderClass(raw)) {
             var enclosing = raw.getEnclosingClass();
-            if (enclosing != null && isMessageClass(enclosing)) return newBuilder(enclosing);
+            if (enclosing != null && isMessageClass(enclosing)) targetClass = enclosing;
         }
         try {
-            var method = raw.getMethod("newBuilder");
+            var method = targetClass.getMethod("newBuilder");
             return (Message.Builder) method.invoke(null);
         } catch (Exception e) {
-            throw new IllegalStateException("Cannot create protobuf builder for " + raw.getName(), e);
+            throw new Json.ConversionException("Cannot create protobuf builder for " + targetClass.getName(), e);
         }
     }
 
@@ -563,7 +580,8 @@ public final class ProtobufCodec implements Json.Codec {
 
     static Json.JsonObject expectObject(Json.JsonValue value) {
         if (value instanceof Json.JsonObject obj) return obj;
-        throw new IllegalStateException("Expected JSON object");
+        throw new Json.ConversionException("Expected JSON object for protobuf message, but got "
+                + value.getClass().getSimpleName());
     }
 
     static Value toValue(Json.JsonValue value) {
