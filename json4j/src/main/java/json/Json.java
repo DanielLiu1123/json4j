@@ -644,102 +644,10 @@ public final class Json {
             }
 
             // temporal types -> string
-            if (o instanceof Date d) {
-                writeString(d.toInstant().toString());
-                return;
-            }
-            if (o instanceof Instant i) {
-                writeString(i.toString());
-                return;
-            }
-            if (o instanceof LocalDate ld) {
-                writeString(ld.toString());
-                return;
-            }
-            if (o instanceof LocalTime lt) {
-                writeString(lt.toString());
-                return;
-            }
-            if (o instanceof LocalDateTime ldt) {
-                writeString(ldt.toString());
-                return;
-            }
-            if (o instanceof ZonedDateTime zdt) {
-                writeString(zdt.toString());
-                return;
-            }
-            if (o instanceof OffsetDateTime odt) {
-                writeString(odt.toString());
-                return;
-            }
-            if (o instanceof Duration du) {
-                writeString(du.toString());
-                return;
-            }
-            if (o instanceof Year y) {
-                writeString(y.toString());
-                return;
-            }
-            if (o instanceof YearMonth ym) {
-                writeString(ym.toString());
-                return;
-            }
-            if (o instanceof MonthDay md) {
-                writeString(md.toString());
-                return;
-            }
-            if (o instanceof Period p) {
-                writeString(p.toString());
-                return;
-            }
-            if (o instanceof ZoneOffset zo) {
-                writeString(zo.toString());
-                return;
-            }
-            if (o instanceof ZoneId zi) {
-                writeString(zi.toString());
-                return;
-            }
+            if (writeTemporal(o)) return;
 
-            // java.util types -> string
-            if (o instanceof UUID uuid) {
-                writeString(uuid.toString());
-                return;
-            }
-            if (o instanceof Locale locale) {
-                writeString(locale.toLanguageTag());
-                return;
-            }
-            if (o instanceof Currency currency) {
-                writeString(currency.getCurrencyCode());
-                return;
-            }
-            if (o instanceof TimeZone tz) {
-                writeString(tz.getID());
-                return;
-            }
-
-            // java.net types -> string
-            if (o instanceof URI uri) {
-                writeString(uri.toString());
-                return;
-            }
-            if (o instanceof URL url) {
-                writeString(url.toString());
-                return;
-            }
-
-            // java.nio.file.Path -> string
-            if (o instanceof Path path) {
-                writeString(path.toString());
-                return;
-            }
-
-            // java.util.regex.Pattern -> string
-            if (o instanceof Pattern pattern) {
-                writeString(pattern.pattern());
-                return;
-            }
+            // string-based types -> string
+            if (writeStringBasedType(o)) return;
 
             // record / bean
             if (o instanceof Record) {
@@ -747,6 +655,109 @@ public final class Json {
                 return;
             }
             writeBean(o);
+        }
+
+        private boolean writeTemporal(Object o) {
+            if (o instanceof Date d) {
+                writeString(d.toInstant().toString());
+                return true;
+            }
+            if (o instanceof Instant i) {
+                writeString(i.toString());
+                return true;
+            }
+            if (o instanceof LocalDate ld) {
+                writeString(ld.toString());
+                return true;
+            }
+            if (o instanceof LocalTime lt) {
+                writeString(lt.toString());
+                return true;
+            }
+            if (o instanceof LocalDateTime ldt) {
+                writeString(ldt.toString());
+                return true;
+            }
+            if (o instanceof ZonedDateTime zdt) {
+                writeString(zdt.toString());
+                return true;
+            }
+            if (o instanceof OffsetDateTime odt) {
+                writeString(odt.toString());
+                return true;
+            }
+            if (o instanceof Duration du) {
+                writeString(du.toString());
+                return true;
+            }
+            if (o instanceof Year y) {
+                writeString(y.toString());
+                return true;
+            }
+            if (o instanceof YearMonth ym) {
+                writeString(ym.toString());
+                return true;
+            }
+            if (o instanceof MonthDay md) {
+                writeString(md.toString());
+                return true;
+            }
+            if (o instanceof Period p) {
+                writeString(p.toString());
+                return true;
+            }
+            if (o instanceof ZoneOffset zo) {
+                writeString(zo.toString());
+                return true;
+            }
+            if (o instanceof ZoneId zi) {
+                writeString(zi.toString());
+                return true;
+            }
+            return false;
+        }
+
+        private boolean writeStringBasedType(Object o) {
+            // java.util types -> string
+            if (o instanceof UUID uuid) {
+                writeString(uuid.toString());
+                return true;
+            }
+            if (o instanceof Locale locale) {
+                writeString(locale.toLanguageTag());
+                return true;
+            }
+            if (o instanceof Currency currency) {
+                writeString(currency.getCurrencyCode());
+                return true;
+            }
+            if (o instanceof TimeZone tz) {
+                writeString(tz.getID());
+                return true;
+            }
+
+            // java.net types -> string
+            if (o instanceof URI uri) {
+                writeString(uri.toString());
+                return true;
+            }
+            if (o instanceof URL url) {
+                writeString(url.toString());
+                return true;
+            }
+
+            // java.nio.file.Path -> string
+            if (o instanceof Path path) {
+                writeString(path.toString());
+                return true;
+            }
+
+            // java.util.regex.Pattern -> string
+            if (o instanceof Pattern pattern) {
+                writeString(pattern.pattern());
+                return true;
+            }
+            return false;
         }
 
         private void writeStream(BaseStream<?, ?> stream) {
