@@ -138,6 +138,7 @@ class JsonTest {
         void stringifyOptional() {
             record Foo(Optional<String> name, Optional<Integer> age) {}
 
+            // @spotless:off
             var table = new Object[][] {
                 {new Foo(Optional.of("Alice"), Optional.of(30)), "{\"name\":\"Alice\",\"age\":30}"},
                 {new Foo(Optional.of("Bob"), Optional.empty()), "{\"name\":\"Bob\"}"},
@@ -146,6 +147,7 @@ class JsonTest {
                 {new Foo(null, Optional.empty()), "{\"name\":null}"},
                 {new Foo(Optional.empty(), null), "{\"age\":null}"}
             };
+            // @spotless:on
 
             assertAll(IntStream.range(0, table.length).mapToObj(i -> () -> {
                 var row = table[i];
@@ -305,6 +307,7 @@ class JsonTest {
         void parseOptional() {
             record Foo(Optional<String> name, Optional<Integer> age) {}
 
+            // @spotless:off
             var table = new Object[][] {
                 {"{\"name\":\"Alice\",\"age\":30}", new Foo(Optional.of("Alice"), Optional.of(30))},
                 {"{\"name\":\"Bob\"}", new Foo(Optional.of("Bob"), Optional.empty())},
@@ -312,6 +315,7 @@ class JsonTest {
                 {"{}", new Foo(Optional.empty(), Optional.empty())},
                 {"{\"name\":null,\"age\":null}", new Foo(null, null)}
             };
+            // @spotless:on
 
             assertAll(IntStream.range(0, table.length).mapToObj(i -> () -> {
                 var row = table[i];

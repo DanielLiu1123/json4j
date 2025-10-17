@@ -676,6 +676,14 @@ public final class Json {
                 writeString(du.toString());
                 return;
             }
+            if (o instanceof Year y) {
+                writeString(y.toString());
+                return;
+            }
+            if (o instanceof YearMonth ym) {
+                writeString(ym.toString());
+                return;
+            }
             if (o instanceof MonthDay md) {
                 writeString(md.toString());
                 return;
