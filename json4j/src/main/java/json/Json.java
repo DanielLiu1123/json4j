@@ -967,28 +967,28 @@ public final class Json {
         }
 
         // 1) Null handling
-        if (jv instanceof JsonNull) return (T) nullValueFor(raw);
+        if (jv instanceof JsonNull) return (T) toNull(raw);
 
         // 2) Scalar targets (LOOSE)
 
         // 2.1 boolean: accept JsonBoolean, "true"/"false", "1"/"0", numeric 1/0
         if (raw == boolean.class || raw == Boolean.class) {
-            return (T) coerceBoolean(jv, raw);
+            return (T) toBoolean(jv, raw);
         }
 
         // 2.2 number: accept JsonNumber, numeric strings, and booleans (true->1, false->0)
         if (Number.class.isAssignableFrom(raw) || (raw.isPrimitive() && raw != char.class)) {
-            return (T) coerceNumber(jv, raw);
+            return (T) toNumber(jv, raw);
         }
 
         // 2.3 String/CharSequence: stringify any JsonValue (numbers/booleans become their textual form)
         if (raw == String.class || raw == CharSequence.class) {
-            return (T) coerceString(jv); // json string should have quote, Java String should not have quote
+            return (T) toString(jv); // json string should have quote, Java String should not have quote
         }
 
         // 2.4 char/Character: accept 1-char string (or stringify first)
         if (raw == char.class || raw == Character.class) {
-            String s = coerceString(jv);
+            String s = toString(jv);
             if (s.length() != 1)
                 throw new ConversionException(
                         "Cannot convert string to char: expected length 1, got " + s.length() + " (\"" + s + "\")");
@@ -997,22 +997,22 @@ public final class Json {
 
         // 2.5 enum: accept name (case-insensitive) or ordinal number (string/number)
         if (raw.isEnum()) {
-            return (T) coerceEnum(jv, raw);
+            return (T) toEnum(jv, raw);
         }
 
         // 2.6 temporal: accept ISO-8601 string or epoch millis (number/string)
         if (isTemporal(raw)) {
-            return (T) coerceTemporal(jv, raw);
+            return (T) toTemporal(jv, raw);
         }
 
         // 2.7 string-based types, like UUID, URI...
         if (isStringBasedType(raw)) {
-            return (T) coerceStringBasedType(jv, raw);
+            return (T) toStringBasedType(jv, raw);
         }
 
         // 2.8 optional: wrap the inner type
         if (raw == Optional.class) {
-            return (T) coerceOptional(jv, targetType);
+            return (T) toOptional(jv, targetType);
         }
 
         // 3) Structured targets (LOOSE)
@@ -1020,19 +1020,19 @@ public final class Json {
         // 3.1 arrays: if non-array provided, wrap single element
         if (raw.isArray()) {
             JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-            return (T) coerceArray(ja, raw.getComponentType());
+            return (T) toArray(ja, raw.getComponentType());
         }
 
         // 3.2 Collection: if non-array provided, wrap single element
         if (Collection.class.isAssignableFrom(raw)) {
             JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-            return (T) coerceCollection(ja, targetType);
+            return (T) toCollection(ja, targetType);
         }
 
         // 3.3 Stream
         if (BaseStream.class.isAssignableFrom(raw)) {
             JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-            return (T) coerceStream(ja, targetType);
+            return (T) toStream(ja, targetType);
         }
 
         // Must JsonObject here!
@@ -1040,17 +1040,17 @@ public final class Json {
 
         // 3.4 Map
         if (Map.class.isAssignableFrom(raw)) {
-            return (T) coerceMap(jo, targetType);
+            return (T) toMap(jo, targetType);
         }
 
         // 3.5 Record
-        if (raw.isRecord()) return (T) coerceRecord(jo, raw);
+        if (raw.isRecord()) return (T) toRecord(jo, raw);
 
         // 3.6 Java bean
-        return (T) coerceBean(jo, raw);
+        return (T) toBean(jo, raw);
     }
 
-    static Object coerceMap(JsonObject jo, java.lang.reflect.Type type) {
+    static Object toMap(JsonObject jo, java.lang.reflect.Type type) {
         var keyType = mapKeyType(type);
         var valueType = mapValueType(type);
         var map = createMap(raw(type), jo.value().size());
@@ -1087,7 +1087,7 @@ public final class Json {
         return (n < 0) ? 1 : (n >= 1 << 30) ? 1 << 30 : n + 1;
     }
 
-    static Object coerceRecord(JsonObject jo, Class<?> raw) {
+    static Object toRecord(JsonObject jo, Class<?> raw) {
         try {
             var components = raw.getRecordComponents();
             Class<?>[] ctorTypes =
@@ -1118,7 +1118,7 @@ public final class Json {
         }
     }
 
-    static Object coerceBean(JsonObject jo, Class<?> raw) {
+    static Object toBean(JsonObject jo, Class<?> raw) {
         Object bean = constructBean(raw);
         try {
             var bi = Introspector.getBeanInfo(raw);
@@ -1243,7 +1243,7 @@ public final class Json {
         return sb.toString();
     }
 
-    static Object coerceArray(JsonArray ja, Class<?> component) {
+    static Object toArray(JsonArray ja, Class<?> component) {
         int len = ja.value().size();
         Object arr = Array.newInstance(component, len);
         for (int i = 0; i < len; i++) {
@@ -1252,7 +1252,7 @@ public final class Json {
         return arr;
     }
 
-    static Object coerceCollection(JsonArray ja, java.lang.reflect.Type type) {
+    static Object toCollection(JsonArray ja, java.lang.reflect.Type type) {
         var coll = createCollection(raw(type), ja.value().size());
         var elemType = collectionElementType(type);
         for (var v : ja.value()) coll.add(fromJsonValue(v, elemType));
@@ -1312,7 +1312,7 @@ public final class Json {
         throw new ConversionException("Unknown JsonValue type: " + jv.getClass());
     }
 
-    static Object nullValueFor(Class<?> raw) {
+    static Object toNull(Class<?> raw) {
         if (raw.isPrimitive()) throw new ConversionException("Cannot assign null to primitive type");
         return null;
     }
@@ -1330,9 +1330,9 @@ public final class Json {
         return null;
     }
 
-    static Object coerceBoolean(JsonValue jv, Class<?> raw) {
+    static Object toBoolean(JsonValue jv, Class<?> raw) {
         if (!(jv instanceof JsonBoolean) && !(jv instanceof JsonString) && !(jv instanceof JsonNumber)) {
-            jv = new JsonString(coerceString(jv));
+            jv = new JsonString(toString(jv));
         }
         boolean bool;
         if (jv instanceof JsonBoolean b) bool = b.value();
@@ -1354,12 +1354,12 @@ public final class Json {
         throw new ConversionException("Unsupported boolean target type");
     }
 
-    static Object coerceNumber(JsonValue jv, Class<?> raw) {
+    static Object toNumber(JsonValue jv, Class<?> raw) {
         if (jv instanceof JsonBoolean b) {
             jv = new JsonNumber(b.value() ? BigDecimal.ONE : BigDecimal.ZERO);
         } else if (!(jv instanceof JsonNumber) && !(jv instanceof JsonString)) {
             // last resort: stringify non-number into string, then parse
-            jv = new JsonString(coerceString(jv));
+            jv = new JsonString(toString(jv));
         }
         BigDecimal bd;
         if (jv instanceof JsonNumber n) {
@@ -1388,14 +1388,14 @@ public final class Json {
         throw new ConversionException("Unsupported numeric target type");
     }
 
-    static String coerceString(JsonValue jv) {
+    static String toString(JsonValue jv) {
         if (jv instanceof JsonString s) return s.value();
         return stringify(jv);
     }
 
-    static Object coerceEnum(JsonValue jv, Class<?> raw) {
+    static Object toEnum(JsonValue jv, Class<?> raw) {
         if (!(jv instanceof JsonString) && !(jv instanceof JsonNumber)) {
-            jv = new JsonString(coerceString(jv)); // fallback to textual form
+            jv = new JsonString(toString(jv)); // fallback to textual form
         }
         if (jv instanceof JsonString s) {
             for (Object ec : raw.getEnumConstants()) if (((Enum<?>) ec).name().equalsIgnoreCase(s.value())) return ec;
@@ -1443,9 +1443,9 @@ public final class Json {
                 || raw == Pattern.class;
     }
 
-    private static Object coerceTemporal(JsonValue jv, Class<?> raw) {
+    private static Object toTemporal(JsonValue jv, Class<?> raw) {
         if (!(jv instanceof JsonString) && !(jv instanceof JsonNumber)) {
-            jv = new JsonString(coerceString(jv));
+            jv = new JsonString(toString(jv));
         }
         try {
             if (raw == Instant.class) {
@@ -1453,10 +1453,10 @@ public final class Json {
                 if (jv instanceof JsonNumber n)
                     return Instant.ofEpochMilli(n.value().longValue());
             } else if (raw == Date.class) {
-                Instant i = (Instant) coerceTemporal(jv, Instant.class);
+                Instant i = (Instant) toTemporal(jv, Instant.class);
                 return Date.from(i);
             } else if (raw == Timestamp.class) {
-                Instant i = (Instant) coerceTemporal(jv, Instant.class);
+                Instant i = (Instant) toTemporal(jv, Instant.class);
                 return Timestamp.from(i);
             } else if (raw == Duration.class) {
                 if (jv instanceof JsonString s) return Duration.parse(s.value());
@@ -1503,8 +1503,8 @@ public final class Json {
         throw new ConversionException("Cannot convert " + jv.getClass().getSimpleName() + " to " + raw.getSimpleName());
     }
 
-    private static Object coerceStringBasedType(JsonValue jv, Class<?> raw) {
-        String value = coerceString(jv);
+    private static Object toStringBasedType(JsonValue jv, Class<?> raw) {
+        String value = toString(jv);
         try {
             if (raw == UUID.class) return UUID.fromString(value);
             if (raw == Locale.class) return Locale.forLanguageTag(value);
@@ -1521,7 +1521,7 @@ public final class Json {
         throw new ConversionException("Cannot convert to " + raw.getSimpleName());
     }
 
-    static Object coerceOptional(JsonValue jv, java.lang.reflect.Type targetType) {
+    static Object toOptional(JsonValue jv, java.lang.reflect.Type targetType) {
         if (!(targetType instanceof ParameterizedType p)) {
             throw new ConversionException("Optional type must be parameterized (e.g., Optional<String>)");
         }
@@ -1529,7 +1529,7 @@ public final class Json {
         return Optional.ofNullable(fromJsonValue(jv, p.getActualTypeArguments()[0]));
     }
 
-    static Object coerceStream(JsonArray ja, java.lang.reflect.Type targetType) {
+    static Object toStream(JsonArray ja, java.lang.reflect.Type targetType) {
         if (!(targetType instanceof ParameterizedType p)) {
             throw new ConversionException("Stream type must be parameterized (e.g., Stream<String>) for type "
                     + raw(targetType).getName());

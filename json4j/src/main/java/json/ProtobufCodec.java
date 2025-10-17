@@ -1,6 +1,5 @@
 package json;
 
-import static json.Json.coerceString;
 import static json.Json.fromJsonValue;
 import static json.Json.isClassPresent;
 import static json.Json.raw;
@@ -518,7 +517,7 @@ public final class ProtobufCodec implements Json.Codec {
             throw new Json.ConversionException("Cannot convert " + jv.getClass() + " to NullValue");
         }
         if (!(jv instanceof Json.JsonString) && !(jv instanceof Json.JsonNumber)) {
-            jv = new Json.JsonString(coerceString(jv));
+            jv = new Json.JsonString(Json.toString(jv));
         }
         if (jv instanceof Json.JsonString s) {
             for (Object ec : raw.getEnumConstants()) if (((Enum<?>) ec).name().equalsIgnoreCase(s.value())) return ec;
