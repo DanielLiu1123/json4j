@@ -30,7 +30,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Currency;
 import java.util.Date;
 import java.util.HashMap;
@@ -71,36 +70,73 @@ class JsonTest {
         void stringify() throws Exception {
             // @spotless:off
             var table = new Object[][] {
-                    {42, "42"},
-                    {true, "true"},
-                    {false, "false"},
-                    {3.14, "3.14"},
-                    {-0.01, "-0.01"},
+                    // null
                     {null, "null"},
+
+                    // String/CharSequence
                     {"hello", "\"hello\""},
                     {"", "\"\""},
-                    {Stream.of(Optional.empty(), Optional.of(1), Optional.of("str"), Optional.of(true), Optional.of(new RecordPerson("Alice", 30, null))), "[null,1,\"str\",true,{\"name\":\"Alice\",\"age\":30,\"birthDate\":null}]"},
-                    {LocalDate.parse("2023-01-01"), "\"2023-01-01\""},
+
+                    // Character (handled as String)
+                    {'A', "\"A\""},
+
+                    // Boolean
+                    {true, "true"},
+                    {false, "false"},
+
+                    // Number
+                    {42, "42"},
+                    {3.14, "3.14"},
+                    {-0.01, "-0.01"},
+
+                    // Optional
+                    {Optional.of(1), "1"},
+                    {Optional.of("str"), "\"str\""},
+                    {Optional.empty(), "null"},
+
+                    // Array (handled in Collection/List)
+
+                    // Collection
                     {List.of(1, 2, 3), "[1,2,3]"},
+                    {new HashSet<>(List.of(1, 2, 3)), "[1,2,3]"},
+                    {new TreeSet<>(List.of(3, 1, 2)), "[1,2,3]"},
+
+                    // Stream
+                    {Stream.of(Optional.empty(), Optional.of(1), Optional.of("str"), Optional.of(true), Optional.of(new RecordPerson("Alice", 30, null))), "[null,1,\"str\",true,{\"name\":\"Alice\",\"age\":30,\"birthDate\":null}]"},
+
+                    // Map
                     {Map.of("key", "value"), "{\"key\":\"value\"}"},
-                    {new RecordPerson("Alice", 30, LocalDate.parse("1993-05-15")), "{\"name\":\"Alice\",\"age\":30,\"birthDate\":\"1993-05-15\"}"},
-                    {new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\":25,\"birthDate\":\"1998-10-20\",\"name\":\"Bob\"}"},
-                    // timestamp
+                    // special map keys
+                    {Map.of(1, "one"), "{\"1\":\"one\"}"},
+                    {Map.of(true, "yes"), "{\"true\":\"yes\"}"},
+                    {new HashMap<>() {{ put(null, "null"); }}, "{\"null\":\"null\"}"},
+                    {Map.of(3.14, "pi"), "{\"3.14\":\"pi\"}"},
+                    {Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\":\"New Year\"}"},
+
+                    // Enum (tested in other tests)
+
+                    // Temporal types
+                    // Date, Instant, Timestamp
                     {Date.from(Instant.parse("2024-03-15T10:15:30Z")), "\"2024-03-15T10:15:30Z\""},
                     {Instant.parse("2024-03-15T10:15:30Z"), "\"2024-03-15T10:15:30Z\""},
                     {Timestamp.from(Instant.parse("2024-03-15T10:15:30Z")), "\"2024-03-15T10:15:30Z\""},
-                    // date time with timezone
-                    {LocalDateTime.parse("2024-01-01T09:00:30"), "\"2024-01-01T09:00:30\""},
+                    // LocalDate, LocalTime, LocalDateTime
+                    {LocalDate.parse("2023-01-01"), "\"2023-01-01\""},
                     {LocalTime.parse("09:00:30"), "\"09:00:30\""},
-                    {OffsetDateTime.parse("2024-01-01T09:00:00+08:00"), "\"2024-01-01T09:00+08:00\""},
+                    {LocalDateTime.parse("2024-01-01T09:00:30"), "\"2024-01-01T09:00:30\""},
+                    // ZonedDateTime, OffsetDateTime
                     {ZonedDateTime.parse("2024-01-01T09:00:00+08:00[Asia/Shanghai]"), "\"2024-01-01T09:00+08:00[Asia/Shanghai]\""},
+                    {OffsetDateTime.parse("2024-01-01T09:00:00+08:00"), "\"2024-01-01T09:00+08:00\""},
+                    // Duration, Year, YearMonth, MonthDay, Period, ZoneOffset, ZoneId
                     {Duration.ofHours(2), "\"PT2H\""},
-                    {Period.ofDays(5), "\"P5D\""},
                     {Year.of(2024), "\"2024\""},
                     {YearMonth.of(2024, 3), "\"2024-03\""},
                     {MonthDay.of(12, 25), "\"--12-25\""},
+                    {Period.ofDays(5), "\"P5D\""},
                     {ZoneOffset.ofHours(8), "\"+08:00\""},
                     {ZoneId.of("Asia/Shanghai"), "\"Asia/Shanghai\""},
+
+                    // String-based types
                     // java.util types
                     {UUID.fromString("550e8400-e29b-41d4-a716-446655440000"), "\"550e8400-e29b-41d4-a716-446655440000\""},
                     {Locale.US, "\"en-US\""},
@@ -111,16 +147,12 @@ class JsonTest {
                     {new URL("https://example.com"), "\"https://example.com\""},
                     // java.util.regex.Pattern
                     {Pattern.compile("[a-z]+"), "\"[a-z]+\""},
-                    // Set types
-                    {new HashSet<>(List.of(1, 2, 3)), "[1,2,3]"},
-                    {new TreeSet<>(List.of(3, 1, 2)), "[1,2,3]"},
-                    // special map keys
-                    {Map.of(1, "one"), "{\"1\":\"one\"}"},
-                    {Map.of(true, "yes"), "{\"true\":\"yes\"}"},
-                    {new HashMap<>() {{ put(null, "null"); }}, "{\"null\":\"null\"}"},
-                    {Map.of(3.14, "pi"), "{\"3.14\":\"pi\"}"},
-                    {Map.of(LocalDate.parse("2024-01-01"), "New Year"), "{\"2024-01-01\":\"New Year\"}"},
-                    // Protobuf support
+
+                    // Record/Bean
+                    {new RecordPerson("Alice", 30, LocalDate.parse("1993-05-15")), "{\"name\":\"Alice\",\"age\":30,\"birthDate\":\"1993-05-15\"}"},
+                    {new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\":25,\"birthDate\":\"1998-10-20\",\"name\":\"Bob\"}"},
+
+                    // Protobuf support (codec)
                     {User.newBuilder().setId(1).setName("Freeman").setStatus(User.Status.ACTIVE).addAllHobbyList(List.of(Hobby.newBuilder().setId(1).setName("gaming").build())).putAllHobbyMap(Map.of(1L, Hobby.newBuilder().setId(1).setName("gaming").build())).build(), "{\"id\":1,\"name\":\"Freeman\",\"status\":\"ACTIVE\",\"hobbyList\":[{\"id\":1,\"name\":\"gaming\"}],\"hobbyMap\":{\"1\":{\"id\":1,\"name\":\"gaming\"}}}"},
                     {User.newBuilder().build(), "{\"id\":0,\"name\":\"\",\"status\":\"STATUS_UNSPECIFIED\",\"hobbyList\":[],\"hobbyMap\":{}}"}
             };
@@ -167,44 +199,75 @@ class JsonTest {
         void parse() throws Exception {
             // @spotless:off
             var table = new Object[][] {
-                    {"\"str\"", Json.Type.of(String.class), "str"},
-                    {"7", Json.Type.of(Integer.class), 7},
-                    {"7", Json.Type.of(String.class), "7"},
-                    {"false", Json.Type.of(Boolean.class), false},
+                    // Object type (dynamic/untyped)
+                    {"{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))},
+
+                    // null handling
                     {"null", new Json.Type<RecordPerson>() {}, null},
                     {"null", new Json.Type<String>() {}, null},
                     {"null", new Json.Type<Optional<?>>() {}, null},
-                    {"[]", new Json.Type<List<RecordPerson>>() {}, List.of()},
-                    {"{}", new Json.Type<Map<String, RecordPerson>>() {}, Map.of()},
-                    {"\"2025-10-10\"", new Json.Type<LocalDate>() {}, LocalDate.parse("2025-10-10")},
-                    {"[1,2,3]", new Json.Type<List<Integer>>() {}, List.of(1, 2, 3)},
-                    {"{\"left\":1,\"right\":2}", new Json.Type<Map<String, Integer>>() {}, Map.of("left", 1, "right", 2)},
-                    {"{\"name\":\"Alice\",\"age\":30}", new Json.Type<RecordPerson>() {}, new RecordPerson("Alice", 30, null)},
-                    {"[{\"name\":\"Alice\",\"age\":30},{\"name\":\"Bob\",\"age\":25,\"birthDate\":\"2025-10-10\"}]", new Json.Type<List<RecordPerson>>() {}, List.of(new RecordPerson("Alice", 30, null), new RecordPerson("Bob", 25, LocalDate.parse("2025-10-10")))},
-                    {"[[1,2],[3,4]]", new Json.Type<List<List<Integer>>>() {}, List.of(List.of(1, 2), List.of(3, 4))},
-                    {"{\"group1\":[{\"name\":\"Alice\",\"age\":30}],\"group2\":[{\"name\":\"Bob\",\"age\":25}]}", new Json.Type<Map<String, List<RecordPerson>>>() {}, Map.of("group1", List.of(new RecordPerson("Alice", 30, null)), "group2", List.of(new RecordPerson("Bob", 25, null)))},
-                    // Number parsing
+
+                    // boolean (LOOSE)
+                    {"false", Json.Type.of(Boolean.class), false},
+                    {"true", Json.Type.of(Boolean.class), true},
+                    // Loose: from number
+                    {"1", new Json.Type<Boolean>() {}, true},
+                    {"0", new Json.Type<Boolean>() {}, false},
+                    // Loose: from string
+                    {"\"true\"", new Json.Type<Boolean>() {}, true},
+                    {"\"false\"", new Json.Type<Boolean>() {}, false},
+
+                    // number (LOOSE)
+                    {"7", Json.Type.of(Integer.class), 7},
                     {"42", new Json.Type<>() {}, 42},
                     {"10000000000", new Json.Type<>() {}, 10000000000L},
                     {"9999999999999999999999999", new Json.Type<>() {}, new BigInteger("9999999999999999999999999")},
                     {"3.14", new Json.Type<>() {}, 3.14},
                     {"1.0000000000000001", new Json.Type<>() {}, new BigDecimal("1.0000000000000001")},
-                    // timestamp
+                    // Loose: from string
+                    {"\"123.4\"", new Json.Type<Double>() {}, 123.4},
+                    {"\"10000000000\"", new Json.Type<Long>() {}, 10000000000L},
+
+                    // String/CharSequence (LOOSE - can stringify any JsonValue)
+                    {"\"str\"", Json.Type.of(String.class), "str"},
+                    // Loose: from number
+                    {"7", Json.Type.of(String.class), "7"},
+                    // Loose: from number/boolean
+                    {"1", new Json.Type<String>() {}, "1"},
+
+                    // char/Character (LOOSE)
+                    {"0", new Json.Type<Character>() {}, '0'},
+
+                    // enum (case-insensitive name or ordinal)
+                    {"\"MONDAY\"", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY}, // exact match
+                    {"\"monday\"", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY}, // case-insensitive
+                    {"0", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY}, // ordinal
+
+                    // temporal (ISO-8601 string or epoch millis)
+                    // Date, Instant, Timestamp
                     {"\"2024-03-15T10:15:30Z\"", new Json.Type<Date>() {}, Date.from(Instant.parse("2024-03-15T10:15:30Z"))},
                     {"\"2024-03-15T10:15:30Z\"", new Json.Type<Instant>() {}, Instant.parse("2024-03-15T10:15:30Z")},
                     {"\"2024-03-15T10:15:30Z\"", new Json.Type<Timestamp>() {}, Timestamp.from(Instant.parse("2024-03-15T10:15:30Z"))},
-                    // date time with timezone
-                    {"\"2024-01-01T09:00+08:00\"", new Json.Type<OffsetDateTime>() {}, OffsetDateTime.parse("2024-01-01T09:00+08:00")},
-                    {"\"2024-01-01T09:00+08:00[Asia/Shanghai]\"", new Json.Type<ZonedDateTime>() {}, ZonedDateTime.parse("2024-01-01T09:00+08:00[Asia/Shanghai]")},
-                    {"\"09:00:30\"", new Json.Type<LocalTime>() {}, LocalTime.parse("09:00:30")},
+                    // Duration, Period
                     {"\"PT2H\"", new Json.Type<Duration>() {}, Duration.ofHours(2)},
                     {"\"P5D\"", new Json.Type<Period>() {}, Period.ofDays(5)},
+                    // LocalDate, LocalTime, LocalDateTime
+                    {"\"2025-10-10\"", new Json.Type<LocalDate>() {}, LocalDate.parse("2025-10-10")},
+                    {"\"09:00:30\"", new Json.Type<LocalTime>() {}, LocalTime.parse("09:00:30")},
+                    {"\"2024-01-01T09:00:30\"", new Json.Type<LocalDateTime>() {}, LocalDateTime.parse("2024-01-01T09:00:30")},
+                    // ZonedDateTime, OffsetDateTime
+                    {"\"2024-01-01T09:00+08:00[Asia/Shanghai]\"", new Json.Type<ZonedDateTime>() {}, ZonedDateTime.parse("2024-01-01T09:00+08:00[Asia/Shanghai]")},
+                    {"\"2024-01-01T09:00+08:00\"", new Json.Type<OffsetDateTime>() {}, OffsetDateTime.parse("2024-01-01T09:00+08:00")},
+                    // Year, YearMonth, MonthDay
                     {"\"2024\"", new Json.Type<Year>() {}, Year.of(2024)},
-                    {"2024", new Json.Type<Year>() {}, Year.of(2024)},
+                    {"2024", new Json.Type<Year>() {}, Year.of(2024)}, // number support for Year
                     {"\"2024-03\"", new Json.Type<YearMonth>() {}, YearMonth.of(2024, 3)},
                     {"\"--12-25\"", new Json.Type<MonthDay>() {}, MonthDay.of(12, 25)},
+                    // ZoneOffset, ZoneId
                     {"\"+08:00\"", new Json.Type<ZoneOffset>() {}, ZoneOffset.ofHours(8)},
                     {"\"Asia/Shanghai\"", new Json.Type<ZoneId>() {}, ZoneId.of("Asia/Shanghai")},
+
+                    // string-based types (UUID, Locale, Currency, TimeZone, URI, URL, Path, Pattern)
                     // java.util types
                     {"\"550e8400-e29b-41d4-a716-446655440000\"", new Json.Type<UUID>() {}, UUID.fromString("550e8400-e29b-41d4-a716-446655440000")},
                     {"\"en-US\"", new Json.Type<Locale>() {}, Locale.US},
@@ -214,34 +277,47 @@ class JsonTest {
                     {"\"https://example.com\"", new Json.Type<URI>() {}, URI.create("https://example.com")},
                     {"\"https://example.com\"", new Json.Type<URL>() {}, new URL("https://example.com")},
                     // java.util.regex.Pattern - removed due to Pattern not implementing equals()
+
+                    // Optional
+                    {"\"str\"", new Json.Type<Optional<String>>() {}, Optional.of("str")},
+
+                    // arrays (if non-array provided, wrap single element)
+                    {"\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}},
+
+                    // Collection (if non-array provided, wrap single element)
+                    {"[]", new Json.Type<List<RecordPerson>>() {}, List.of()},
+                    {"[1,2,3]", new Json.Type<List<Integer>>() {}, List.of(1, 2, 3)},
+                    {"[[1,2],[3,4]]", new Json.Type<List<List<Integer>>>() {}, List.of(List.of(1, 2), List.of(3, 4))},
+                    {"[{\"name\":\"Alice\",\"age\":30},{\"name\":\"Bob\",\"age\":25,\"birthDate\":\"2025-10-10\"}]", new Json.Type<List<RecordPerson>>() {}, List.of(new RecordPerson("Alice", 30, null), new RecordPerson("Bob", 25, LocalDate.parse("2025-10-10")))},
                     // Set types
                     {"[1,2,3]", new Json.Type<HashSet<Integer>>() {}, new HashSet<>(List.of(1, 2, 3))},
                     {"[3,1,2]", new Json.Type<TreeSet<Integer>>() {}, new TreeSet<>(List.of(3, 1, 2))},
                     {"[1,2,3]", new Json.Type<Set<Integer>>() {}, Set.of(1, 2, 3)},
-                    // special map keys
+                    // Loose: wrap single element
+                    {"\"2025-01-01\"", new Json.Type<List<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))},
+
+                    // Stream (tested in separate test)
+
+                    // Map
+                    {"{}", new Json.Type<Map<String, RecordPerson>>() {}, Map.of()},
+                    {"{\"left\":1,\"right\":2}", new Json.Type<Map<String, Integer>>() {}, Map.of("left", 1, "right", 2)},
+                    {"{\"group1\":[{\"name\":\"Alice\",\"age\":30}],\"group2\":[{\"name\":\"Bob\",\"age\":25}]}", new Json.Type<Map<String, List<RecordPerson>>>() {}, Map.of("group1", List.of(new RecordPerson("Alice", 30, null)), "group2", List.of(new RecordPerson("Bob", 25, null)))},
+                    // special map keys (coercion)
                     {"{\"1\":\"one\"}", new Json.Type<Map<Integer, String>>() {}, Map.of(1, "one")},
                     {"{\"true\":\"yes\"}", new Json.Type<Map<Boolean, String>>() {}, Map.of(true, "yes")},
                     {"{\"3.14\":\"pi\"}", new Json.Type<Map<Double, String>>() {}, Map.of(3.14, "pi")},
                     {"{\"2024-01-01\":\"New Year\"}", new Json.Type<Map<LocalDate, String>>() {}, Map.of(LocalDate.parse("2024-01-01"), "New Year")},
-                    // Loose parsing
-                    {"1", new Json.Type<String>() {}, "1"},
-                    {"1", new Json.Type<Boolean>() {}, true},
-                    {"0", new Json.Type<Boolean>() {}, false},
-                    {"0", new Json.Type<Character>() {}, '0'},
-                    {"\"MONDAY\"", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY}, // exact match
-                    {"\"monday\"", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY}, // case-insensitive
-                    {"0", new Json.Type<DayOfWeek>() {}, DayOfWeek.MONDAY}, // ordinal
-                    {"\"true\"", new Json.Type<Boolean>() {}, true},
-                    {"\"false\"", new Json.Type<Boolean>() {}, false},
-                    {"\"123.4\"", new Json.Type<Double>() {}, 123.4},
-                    {"{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))},
-                    {"\"10000000000\"", new Json.Type<Long>() {}, 10000000000L},
-                    {"\"2025-01-01\"", new Json.Type<Collection<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))},
-                    {"\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}},
+
+                    // Record
+                    {"{\"name\":\"Alice\",\"age\":30}", new Json.Type<RecordPerson>() {}, new RecordPerson("Alice", 30, null)},
                     // Loose parsing snake_case to camelCase
                     {"{\"name\":\"Alice\",\"birth_date\":\"1993-05-15\"}", new Json.Type<RecordPerson>() {}, new RecordPerson("Alice", 0, LocalDate.parse("1993-05-15"))},
+
+                    // Bean
+                    // Loose parsing snake_case to camelCase
                     {"{\"name\":\"Bob\",\"birth_date\":\"1998-10-20\"}", new Json.Type<ClassPerson>() {}, new ClassPerson() {{ setName("Bob"); setBirthDate(LocalDate.parse("1998-10-20")); }}},
-                    // Protobuf support
+
+                    // Protobuf support (codec)
                     {"{\"id\":1,\"name\":\"Freeman\",\"status\":\"ACTIVE\",\"hobbyList\":[{\"id\":1,\"name\":\"gaming\"}],\"hobbyMap\":{\"1\":{\"id\":1,\"name\":\"gaming\"}}}", new Json.Type<User>() {}, User.newBuilder().setId(1).setName("Freeman").setStatus(User.Status.ACTIVE).addAllHobbyList(List.of(Hobby.newBuilder().setId(1).setName("gaming").build())).putAllHobbyMap(Map.of(1L, Hobby.newBuilder().setId(1).setName("gaming").build())).build()},
                     {"{}", new Json.Type<User>() {}, User.newBuilder().build()},
                     {"{\"id\":0,\"hobby_list\":[]}", new Json.Type<User>() {}, User.newBuilder().build()},
@@ -314,7 +390,7 @@ class JsonTest {
                 {"{\"name\":\"Bob\"}", new Foo(Optional.of("Bob"), Optional.empty())},
                 {"{\"age\":25}", new Foo(Optional.empty(), Optional.of(25))},
                 {"{}", new Foo(Optional.empty(), Optional.empty())},
-                {"{\"name\":null,\"age\":null}", new Foo(null, null)}
+                {"{\"name\":null,\"age\":null}", new Foo(Optional.empty(), Optional.empty())}
             };
             // @spotless:on
 

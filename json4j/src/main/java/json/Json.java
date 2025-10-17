@@ -7,6 +7,7 @@ import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
+import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.math.BigDecimal;
@@ -1137,10 +1138,15 @@ public final class Json {
                 if ("class".equals(pd.getName())) continue;
                 var write = pd.getWriteMethod();
                 if (write == null) continue;
+                var parameterType = write.getGenericParameterTypes()[0];
+                var parameterRawType = raw(parameterType);
                 JsonValue v = findPropertyValue(jo, pd.getName());
-                if (v == null) continue;
+                if (v == null) {
+                    if (parameterRawType == Optional.class) write.invoke(bean, Optional.empty());
+                    continue;
+                }
                 try {
-                    Object tv = fromJsonValue(v, write.getGenericParameterTypes()[0]);
+                    Object tv = fromJsonValue(v, parameterType);
                     write.invoke(bean, tv);
                 } catch (Exception e) {
                     throw new ConversionException(
@@ -1197,18 +1203,18 @@ public final class Json {
     static JsonValue findPropertyValue(JsonObject jo, String propertyName) {
         var map = jo.value();
         JsonValue direct = map.get(propertyName);
-        if (direct != null || map.containsKey(propertyName)) return direct;
+        if (direct != null) return direct;
 
         String snake = toSnakeCase(propertyName);
         if (!snake.equals(propertyName)) {
             JsonValue alt = map.get(snake);
-            if (alt != null || map.containsKey(snake)) return alt;
+            if (alt != null) return alt;
         }
 
         String camel = toCamelCase(propertyName);
         if (!camel.equals(propertyName)) {
             JsonValue alt = map.get(camel);
-            if (alt != null || map.containsKey(camel)) return alt;
+            if (alt != null) return alt;
         }
 
         return null;
@@ -1325,6 +1331,7 @@ public final class Json {
 
     static Object toNull(Class<?> raw) {
         if (raw.isPrimitive()) throw new ConversionException("Cannot assign null to primitive type");
+        if (raw == Optional.class) return Optional.empty();
         return null;
     }
 
