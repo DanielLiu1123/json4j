@@ -12,20 +12,38 @@ import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.URI;
+import java.net.URL;
 import java.sql.Timestamp;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.MonthDay;
 import java.time.OffsetDateTime;
+import java.time.Period;
+import java.time.Year;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Currency;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.TreeSet;
+import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import json4j.user.Hobby;
@@ -49,7 +67,7 @@ class JsonTest {
     class StringifyTests {
 
         @Test
-        void stringify() {
+        void stringify() throws Exception {
             // @spotless:off
             var table = new Object[][] {
                     {42, "42"},
@@ -72,8 +90,29 @@ class JsonTest {
                     {Timestamp.from(Instant.parse("2024-03-15T10:15:30Z")), "\"2024-03-15T10:15:30Z\""},
                     // date time with timezone
                     {LocalDateTime.parse("2024-01-01T09:00:30"), "\"2024-01-01T09:00:30\""},
+                    {LocalTime.parse("09:00:30"), "\"09:00:30\""},
                     {OffsetDateTime.parse("2024-01-01T09:00:00+08:00"), "\"2024-01-01T09:00+08:00\""},
                     {ZonedDateTime.parse("2024-01-01T09:00:00+08:00[Asia/Shanghai]"), "\"2024-01-01T09:00+08:00[Asia/Shanghai]\""},
+                    {Duration.ofHours(2), "\"PT2H\""},
+                    {Period.ofDays(5), "\"P5D\""},
+                    {Year.of(2024), "\"2024\""},
+                    {YearMonth.of(2024, 3), "\"2024-03\""},
+                    {MonthDay.of(12, 25), "\"--12-25\""},
+                    {ZoneOffset.ofHours(8), "\"+08:00\""},
+                    {ZoneId.of("Asia/Shanghai"), "\"Asia/Shanghai\""},
+                    // java.util types
+                    {UUID.fromString("550e8400-e29b-41d4-a716-446655440000"), "\"550e8400-e29b-41d4-a716-446655440000\""},
+                    {Locale.US, "\"en-US\""},
+                    {Currency.getInstance("USD"), "\"USD\""},
+                    {TimeZone.getTimeZone("Asia/Shanghai"), "\"Asia/Shanghai\""},
+                    // java.net types
+                    {URI.create("https://example.com"), "\"https://example.com\""},
+                    {new URL("https://example.com"), "\"https://example.com\""},
+                    // java.util.regex.Pattern
+                    {Pattern.compile("[a-z]+"), "\"[a-z]+\""},
+                    // Set types
+                    {new HashSet<>(List.of(1, 2, 3)), "[1,2,3]"},
+                    {new TreeSet<>(List.of(3, 1, 2)), "[1,2,3]"},
                     // special map keys
                     {Map.of(1, "one"), "{\"1\":\"one\"}"},
                     {Map.of(true, "yes"), "{\"true\":\"yes\"}"},
@@ -122,7 +161,7 @@ class JsonTest {
     class ParseTests {
 
         @Test
-        void parse() {
+        void parse() throws Exception {
             // @spotless:off
             var table = new Object[][] {
                     {"\"str\"", Json.Type.of(String.class), "str"},
@@ -154,6 +193,28 @@ class JsonTest {
                     // date time with timezone
                     {"\"2024-01-01T09:00+08:00\"", new Json.Type<OffsetDateTime>() {}, OffsetDateTime.parse("2024-01-01T09:00+08:00")},
                     {"\"2024-01-01T09:00+08:00[Asia/Shanghai]\"", new Json.Type<ZonedDateTime>() {}, ZonedDateTime.parse("2024-01-01T09:00+08:00[Asia/Shanghai]")},
+                    {"\"09:00:30\"", new Json.Type<LocalTime>() {}, LocalTime.parse("09:00:30")},
+                    {"\"PT2H\"", new Json.Type<Duration>() {}, Duration.ofHours(2)},
+                    {"\"P5D\"", new Json.Type<Period>() {}, Period.ofDays(5)},
+                    {"\"2024\"", new Json.Type<Year>() {}, Year.of(2024)},
+                    {"2024", new Json.Type<Year>() {}, Year.of(2024)},
+                    {"\"2024-03\"", new Json.Type<YearMonth>() {}, YearMonth.of(2024, 3)},
+                    {"\"--12-25\"", new Json.Type<MonthDay>() {}, MonthDay.of(12, 25)},
+                    {"\"+08:00\"", new Json.Type<ZoneOffset>() {}, ZoneOffset.ofHours(8)},
+                    {"\"Asia/Shanghai\"", new Json.Type<ZoneId>() {}, ZoneId.of("Asia/Shanghai")},
+                    // java.util types
+                    {"\"550e8400-e29b-41d4-a716-446655440000\"", new Json.Type<UUID>() {}, UUID.fromString("550e8400-e29b-41d4-a716-446655440000")},
+                    {"\"en-US\"", new Json.Type<Locale>() {}, Locale.US},
+                    {"\"USD\"", new Json.Type<Currency>() {}, Currency.getInstance("USD")},
+                    {"\"Asia/Shanghai\"", new Json.Type<TimeZone>() {}, TimeZone.getTimeZone("Asia/Shanghai")},
+                    // java.net types
+                    {"\"https://example.com\"", new Json.Type<URI>() {}, URI.create("https://example.com")},
+                    {"\"https://example.com\"", new Json.Type<URL>() {}, new URL("https://example.com")},
+                    // java.util.regex.Pattern - removed due to Pattern not implementing equals()
+                    // Set types
+                    {"[1,2,3]", new Json.Type<HashSet<Integer>>() {}, new HashSet<>(List.of(1, 2, 3))},
+                    {"[3,1,2]", new Json.Type<TreeSet<Integer>>() {}, new TreeSet<>(List.of(3, 1, 2))},
+                    {"[1,2,3]", new Json.Type<Set<Integer>>() {}, Set.of(1, 2, 3)},
                     // special map keys
                     {"{\"1\":\"one\"}", new Json.Type<Map<Integer, String>>() {}, Map.of(1, "one")},
                     {"{\"true\":\"yes\"}", new Json.Type<Map<Boolean, String>>() {}, Map.of(true, "yes")},

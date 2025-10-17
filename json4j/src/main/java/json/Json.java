@@ -11,19 +11,28 @@ import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.URI;
+import java.net.URL;
+import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.MonthDay;
 import java.time.OffsetDateTime;
+import java.time.Period;
+import java.time.Year;
+import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Currency;
 import java.util.Date;
 import java.util.EnumMap;
 import java.util.IdentityHashMap;
@@ -31,18 +40,28 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.ServiceLoader;
+import java.util.SimpleTimeZone;
 import java.util.Spliterators;
 import java.util.Stack;
+import java.util.TimeZone;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.UUID;
 import java.util.Vector;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.regex.Pattern;
 import java.util.stream.BaseStream;
 import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
@@ -624,7 +643,7 @@ public final class Json {
                 return;
             }
 
-            // EXT: temporal types -> string
+            // temporal types -> string
             if (o instanceof Date d) {
                 writeString(d.toInstant().toString());
                 return;
@@ -655,6 +674,62 @@ public final class Json {
             }
             if (o instanceof Duration du) {
                 writeString(du.toString());
+                return;
+            }
+            if (o instanceof MonthDay md) {
+                writeString(md.toString());
+                return;
+            }
+            if (o instanceof Period p) {
+                writeString(p.toString());
+                return;
+            }
+            if (o instanceof ZoneOffset zo) {
+                writeString(zo.toString());
+                return;
+            }
+            if (o instanceof ZoneId zi) {
+                writeString(zi.toString());
+                return;
+            }
+
+            // java.util types -> string
+            if (o instanceof UUID uuid) {
+                writeString(uuid.toString());
+                return;
+            }
+            if (o instanceof Locale locale) {
+                writeString(locale.toLanguageTag());
+                return;
+            }
+            if (o instanceof Currency currency) {
+                writeString(currency.getCurrencyCode());
+                return;
+            }
+            if (o instanceof TimeZone tz) {
+                writeString(tz.getID());
+                return;
+            }
+
+            // java.net types -> string
+            if (o instanceof URI uri) {
+                writeString(uri.toString());
+                return;
+            }
+            if (o instanceof URL url) {
+                writeString(url.toString());
+                return;
+            }
+
+            // java.nio.file.Path -> string
+            if (o instanceof Path path) {
+                writeString(path.toString());
+                return;
+            }
+
+            // java.util.regex.Pattern -> string
+            if (o instanceof Pattern pattern) {
+                writeString(pattern.pattern());
                 return;
             }
 
@@ -922,7 +997,12 @@ public final class Json {
             return (T) coerceTemporal(jv, raw);
         }
 
-        // 2.7 optional: wrap the inner type
+        // 2.7 string-based types: UUID, Locale, Currency, TimeZone, URI, URL, Path, Pattern
+        if (isStringBasedType(raw)) {
+            return (T) coerceStringBasedType(jv, raw);
+        }
+
+        // 2.8 optional: wrap the inner type
         if (raw == Optional.class) {
             return (T) coerceOptional(jv, targetType);
         }
@@ -1176,10 +1256,15 @@ public final class Json {
         if (typeBetween(raw, ArrayList.class, Iterable.class)) return new ArrayList<>(size);
         if (typeBetween(raw, LinkedList.class, null)) return new LinkedList<>();
         if (typeBetween(raw, LinkedHashSet.class, null)) return new LinkedHashSet<>(size);
+        if (typeBetween(raw, TreeSet.class, null)) return new TreeSet<>();
         if (typeBetween(raw, ArrayDeque.class, null)) return new ArrayDeque<>(size);
+        if (typeBetween(raw, PriorityQueue.class, null)) return new PriorityQueue<>(size);
         if (typeBetween(raw, Vector.class, null)) return new Vector<>(size);
         if (typeBetween(raw, Stack.class, null)) return new Stack<>();
         if (typeBetween(raw, ArrayBlockingQueue.class, null)) return new ArrayBlockingQueue<>(size);
+        if (typeBetween(raw, LinkedBlockingQueue.class, null)) return new LinkedBlockingQueue<>();
+        if (typeBetween(raw, ConcurrentLinkedQueue.class, null)) return new ConcurrentLinkedQueue<>();
+        if (typeBetween(raw, ConcurrentSkipListSet.class, null)) return new ConcurrentSkipListSet<>();
         if (typeBetween(raw, CopyOnWriteArrayList.class, null)) return new CopyOnWriteArrayList<>();
         try {
             return (Collection<Object>) raw.getDeclaredConstructor().newInstance();
@@ -1330,7 +1415,24 @@ public final class Json {
                 || raw == LocalDateTime.class
                 || raw == ZonedDateTime.class
                 || raw == OffsetDateTime.class
-                || raw == Duration.class;
+                || raw == Duration.class
+                || raw == Year.class
+                || raw == YearMonth.class
+                || raw == MonthDay.class
+                || raw == Period.class
+                || raw == ZoneOffset.class
+                || raw == ZoneId.class;
+    }
+
+    private static boolean isStringBasedType(Class<?> raw) {
+        return raw == UUID.class
+                || raw == Locale.class
+                || raw == Currency.class
+                || raw == TimeZone.class
+                || raw == URI.class
+                || raw == URL.class
+                || raw == Path.class
+                || raw == Pattern.class;
     }
 
     private static Object coerceTemporal(JsonValue jv, Class<?> raw) {
@@ -1352,6 +1454,8 @@ public final class Json {
                 if (jv instanceof JsonString s) return Duration.parse(s.value());
                 if (jv instanceof JsonNumber n)
                     return Duration.ofMillis(n.value().longValue());
+            } else if (raw == Period.class) {
+                if (jv instanceof JsonString s) return Period.parse(s.value());
             } else if (raw == LocalDate.class) {
                 if (jv instanceof JsonString s) return LocalDate.parse(s.value());
             } else if (raw == LocalTime.class) {
@@ -1372,12 +1476,41 @@ public final class Json {
                     return Instant.ofEpochMilli(n.value().longValue())
                             .atZone(ZoneId.systemDefault())
                             .toOffsetDateTime();
+            } else if (raw == Year.class) {
+                if (jv instanceof JsonString s) return Year.parse(s.value());
+                if (jv instanceof JsonNumber n) return Year.of(n.value().intValue());
+            } else if (raw == YearMonth.class) {
+                if (jv instanceof JsonString s) return YearMonth.parse(s.value());
+            } else if (raw == MonthDay.class) {
+                if (jv instanceof JsonString s) return MonthDay.parse(s.value());
+            } else if (raw == ZoneOffset.class) {
+                if (jv instanceof JsonString s) return ZoneOffset.of(s.value());
+            } else if (raw == ZoneId.class) {
+                if (jv instanceof JsonString s) return ZoneId.of(s.value());
             }
         } catch (java.lang.Exception e) {
             String value = jv instanceof JsonString s ? s.value() : String.valueOf(jv);
             throw new ConversionException("Cannot parse " + raw.getSimpleName() + " from value: '" + value + "'", e);
         }
         throw new ConversionException("Cannot convert " + jv.getClass().getSimpleName() + " to " + raw.getSimpleName());
+    }
+
+    private static Object coerceStringBasedType(JsonValue jv, Class<?> raw) {
+        String value = coerceString(jv);
+        try {
+            if (raw == UUID.class) return UUID.fromString(value);
+            if (raw == Locale.class) return Locale.forLanguageTag(value);
+            if (raw == Currency.class) return Currency.getInstance(value);
+            if (raw == SimpleTimeZone.class) return SimpleTimeZone.getTimeZone(ZoneId.of(value));
+            if (raw == TimeZone.class) return TimeZone.getTimeZone(value);
+            if (raw == URI.class) return URI.create(value);
+            if (raw == URL.class) return new URL(value);
+            if (raw == Path.class) return Path.of(value);
+            if (raw == Pattern.class) return Pattern.compile(value);
+        } catch (java.lang.Exception e) {
+            throw new ConversionException("Cannot parse " + raw.getSimpleName() + " from value: '" + value + "'", e);
+        }
+        throw new ConversionException("Cannot convert to " + raw.getSimpleName());
     }
 
     static Object coerceOptional(JsonValue jv, java.lang.reflect.Type targetType) {
