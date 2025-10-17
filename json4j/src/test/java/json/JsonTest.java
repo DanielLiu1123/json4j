@@ -30,6 +30,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Currency;
 import java.util.Date;
 import java.util.HashMap;
@@ -235,7 +236,7 @@ class JsonTest {
                     {"\"123.4\"", new Json.Type<Double>() {}, 123.4},
                     {"{\"key1\":\"value1\",\"key2\":[1,true,1.01]}", new Json.Type<Object>() {}, Map.of("key1", "value1", "key2", List.of(1, true, 1.01))},
                     {"\"10000000000\"", new Json.Type<Long>() {}, 10000000000L},
-                    {"\"2025-01-01\"", new Json.Type<Iterable<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))},
+                    {"\"2025-01-01\"", new Json.Type<Collection<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))},
                     {"\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}},
                     // Loose parsing snake_case to camelCase
                     {"{\"name\":\"Alice\",\"birth_date\":\"1993-05-15\"}", new Json.Type<RecordPerson>() {}, new RecordPerson("Alice", 0, LocalDate.parse("1993-05-15"))},

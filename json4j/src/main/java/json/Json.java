@@ -626,8 +626,8 @@ public final class Json {
                 writeArray(o);
                 return;
             }
-            if (o instanceof Iterable<?> it) {
-                writeIterable(it);
+            if (o instanceof Collection<?> coll) {
+                writeCollection(coll);
                 return;
             }
             if (o instanceof BaseStream<?, ?> stream) {
@@ -834,10 +834,10 @@ public final class Json {
             out.append(']');
         }
 
-        private void writeIterable(Iterable<?> it) {
+        private void writeCollection(Collection<?> coll) {
             out.append('[');
             boolean first = true;
-            for (Object e : it) {
+            for (Object e : coll) {
                 if (!first) out.append(',');
                 first = false;
                 write(e);
@@ -1005,7 +1005,7 @@ public final class Json {
             return (T) coerceTemporal(jv, raw);
         }
 
-        // 2.7 string-based types: UUID, Locale, Currency, TimeZone, URI, URL, Path, Pattern
+        // 2.7 string-based types, like UUID, URI...
         if (isStringBasedType(raw)) {
             return (T) coerceStringBasedType(jv, raw);
         }
@@ -1024,9 +1024,9 @@ public final class Json {
         }
 
         // 3.2 Collection: if non-array provided, wrap single element
-        if (Iterable.class.isAssignableFrom(raw)) {
+        if (Collection.class.isAssignableFrom(raw)) {
             JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-            return (T) coerceIterable(ja, targetType);
+            return (T) coerceCollection(ja, targetType);
         }
 
         // 3.3 Stream
@@ -1252,7 +1252,7 @@ public final class Json {
         return arr;
     }
 
-    static Object coerceIterable(JsonArray ja, java.lang.reflect.Type type) {
+    static Object coerceCollection(JsonArray ja, java.lang.reflect.Type type) {
         var coll = createCollection(raw(type), ja.value().size());
         var elemType = collectionElementType(type);
         for (var v : ja.value()) coll.add(fromJsonValue(v, elemType));
@@ -1261,7 +1261,7 @@ public final class Json {
 
     @SuppressWarnings("unchecked")
     static Collection<Object> createCollection(Class<?> raw, int size) {
-        if (typeBetween(raw, ArrayList.class, Iterable.class)) return new ArrayList<>(size);
+        if (typeBetween(raw, ArrayList.class, Collection.class)) return new ArrayList<>(size);
         if (typeBetween(raw, LinkedList.class, null)) return new LinkedList<>();
         if (typeBetween(raw, LinkedHashSet.class, null)) return new LinkedHashSet<>(size);
         if (typeBetween(raw, TreeSet.class, null)) return new TreeSet<>();
@@ -1436,7 +1436,7 @@ public final class Json {
         return raw == UUID.class
                 || raw == Locale.class
                 || raw == Currency.class
-                || raw == TimeZone.class
+                || typeBetween(raw, SimpleTimeZone.class, TimeZone.class)
                 || raw == URI.class
                 || raw == URL.class
                 || raw == Path.class
