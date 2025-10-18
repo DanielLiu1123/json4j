@@ -43,6 +43,7 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -472,7 +473,12 @@ class JsonTest {
                     {"\"true\"", new Json.Type<java.util.concurrent.atomic.AtomicBoolean>() {}, true},
                     {"\"false\"", new Json.Type<java.util.concurrent.atomic.AtomicBoolean>() {}, false},
                     {"1", new Json.Type<java.util.concurrent.atomic.AtomicBoolean>() {}, true},
-                    {"0", new Json.Type<java.util.concurrent.atomic.AtomicBoolean>() {}, false}
+                    {"0", new Json.Type<java.util.concurrent.atomic.AtomicBoolean>() {}, false},
+
+                    // AtomicReference
+                    {"\"hello\"", new Json.Type<AtomicReference<String>>() {}, "hello"},
+                    {"42", new Json.Type<AtomicReference<Integer>>() {}, 42},
+                    {"null", new Json.Type<AtomicReference<String>>() {}, null}
             };
             // @spotless:on
 
@@ -492,6 +498,8 @@ class JsonTest {
                     actualValue = al.get();
                 } else if (actual instanceof java.util.concurrent.atomic.AtomicBoolean ab) {
                     actualValue = ab.get();
+                } else if (actual instanceof AtomicReference<?> ar) {
+                    actualValue = ar.get();
                 } else {
                     throw new AssertionError("Unexpected type: " + actual.getClass());
                 }
@@ -512,7 +520,10 @@ class JsonTest {
                     {new java.util.concurrent.atomic.AtomicLong(10000000000L), "10000000000"},
                     {new java.util.concurrent.atomic.AtomicLong(0L), "0"},
                     {new java.util.concurrent.atomic.AtomicBoolean(true), "true"},
-                    {new java.util.concurrent.atomic.AtomicBoolean(false), "false"}
+                    {new java.util.concurrent.atomic.AtomicBoolean(false), "false"},
+                    {new AtomicReference<>("hello"), "\"hello\""},
+                    {new AtomicReference<>(42), "42"},
+                    {new AtomicReference<>(null), "null"}
             };
             // @spotless:on
 
