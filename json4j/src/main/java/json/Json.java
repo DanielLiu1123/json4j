@@ -7,7 +7,6 @@ import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
-import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.math.BigDecimal;
@@ -1049,7 +1048,8 @@ public final class Json {
 
         // 2.9 AtomicReference: wrap the inner type
         if (raw == AtomicReference.class) {
-            return (T) toAtomicReference(jv, targetType);
+            return (T) new AtomicReference<>(
+                    fromJsonValue(jv, ((ParameterizedType) targetType).getActualTypeArguments()[0]));
         }
 
         // 3) Structured targets (LOOSE)
@@ -1578,14 +1578,6 @@ public final class Json {
         }
         if (jv instanceof JsonNull) return Optional.empty();
         return Optional.ofNullable(fromJsonValue(jv, p.getActualTypeArguments()[0]));
-    }
-
-    static Object toAtomicReference(JsonValue jv, java.lang.reflect.Type targetType) {
-        if (!(targetType instanceof ParameterizedType p)) {
-            throw new ConversionException("AtomicReference type must be parameterized (e.g., AtomicReference<String>)");
-        }
-        if (jv instanceof JsonNull) return new AtomicReference<>(null);
-        return new AtomicReference<>(fromJsonValue(jv, p.getActualTypeArguments()[0]));
     }
 
     static Object toStream(JsonArray ja, java.lang.reflect.Type targetType) {
