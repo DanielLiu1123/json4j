@@ -177,8 +177,7 @@ class JsonTest {
                 {new Foo(Optional.of("Bob"), Optional.empty()), "{\"name\":\"Bob\"}"},
                 {new Foo(Optional.empty(), Optional.of(25)), "{\"age\":25}"},
                 {new Foo(Optional.empty(), Optional.empty()), "{}"},
-                {new Foo(null, Optional.empty()), "{\"name\":null}"},
-                {new Foo(Optional.empty(), null), "{\"age\":null}"}
+                {new Foo(null, Optional.empty()), "{}"}, // null Optional treated as empty
             };
             // @spotless:on
 
@@ -205,7 +204,7 @@ class JsonTest {
                     // null handling
                     {"null", new Json.Type<RecordPerson>() {}, null},
                     {"null", new Json.Type<String>() {}, null},
-                    {"null", new Json.Type<Optional<?>>() {}, null},
+                    {"null", new Json.Type<Optional<?>>() {}, Optional.empty()},
 
                     // boolean (LOOSE)
                     {"false", Json.Type.of(Boolean.class), false},
@@ -280,6 +279,9 @@ class JsonTest {
 
                     // Optional
                     {"\"str\"", new Json.Type<Optional<String>>() {}, Optional.of("str")},
+                    {"1", new Json.Type<Optional<String>>() {}, Optional.of("1")},
+                    {"1", new Json.Type<Optional<Boolean>>() {}, Optional.of(true)},
+                    {"null", new Json.Type<Optional<String>>() {}, Optional.empty()},
 
                     // arrays (if non-array provided, wrap single element)
                     {"\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}},
@@ -295,8 +297,6 @@ class JsonTest {
                     {"[1,2,3]", new Json.Type<Set<Integer>>() {}, Set.of(1, 2, 3)},
                     // Loose: wrap single element
                     {"\"2025-01-01\"", new Json.Type<List<LocalDate>>() {}, List.of(LocalDate.parse("2025-01-01"))},
-
-                    // Stream (tested in separate test)
 
                     // Map
                     {"{}", new Json.Type<Map<String, RecordPerson>>() {}, Map.of()},
@@ -381,7 +381,7 @@ class JsonTest {
         }
 
         @Test
-        void parseOptional() {
+        void parseRecordOptionalProperties() {
             record Foo(Optional<String> name, Optional<Integer> age) {}
 
             // @spotless:off
@@ -399,6 +399,33 @@ class JsonTest {
                 var input = (String) row[0];
                 var expected = (Foo) row[1];
                 var actual = Json.parse(input, new Json.Type<Foo>() {});
+                assertThat(actual).as("Case %d: input=%s", i, input).isEqualTo(expected);
+            }));
+        }
+
+        @Test
+        void parseBeanOptionalProperties() {
+            @Data
+            class Bar {
+                private final Optional<String> name;
+                private final Optional<Integer> age;
+            }
+
+            // @spotless:off
+            var table2 = new Object[][] {
+                    {"{\"name\":\"Alice\",\"age\":30}", new Bar(Optional.of("Alice"), Optional.of(30))},
+                    {"{\"name\":\"Bob\"}", new Bar(Optional.of("Bob"), Optional.empty())},
+                    {"{\"age\":25}", new Bar(Optional.empty(), Optional.of(25))},
+                    {"{}", new Bar(Optional.empty(), Optional.empty())},
+                    {"{\"name\":null,\"age\":null}", new Bar(Optional.empty(), Optional.empty())}
+            };
+            // @spotless:on
+
+            assertAll(IntStream.range(0, table2.length).mapToObj(i -> () -> {
+                var row = table2[i];
+                var input = (String) row[0];
+                var expected = (Bar) row[1];
+                var actual = Json.parse(input, new Json.Type<Bar>() {});
                 assertThat(actual).as("Case %d: input=%s", i, input).isEqualTo(expected);
             }));
         }

@@ -875,8 +875,11 @@ public final class Json {
             boolean first = true;
             for (var c : r.getClass().getRecordComponents()) {
                 try {
-                    Object v = c.getAccessor().invoke(r);
-                    if (v instanceof Optional<?> optional) {
+                    var readMethod = c.getAccessor();
+                    Object v = readMethod.invoke(r);
+                    if (readMethod.getReturnType() == Optional.class) {
+                        if (v == null) continue; // treat null Optional as empty
+                        var optional = (Optional<?>) v;
                         if (optional.isEmpty()) continue;
                         v = optional.get();
                     }
@@ -906,7 +909,9 @@ public final class Json {
                     if (read == null) continue;
                     try {
                         Object v = read.invoke(bean);
-                        if (v instanceof Optional<?> optional) {
+                        if (read.getReturnType() == Optional.class) {
+                            if (v == null) continue; // treat null Optional as empty
+                            var optional = (Optional<?>) v;
                             if (optional.isEmpty()) continue;
                             v = optional.get();
                         }
@@ -1131,7 +1136,7 @@ public final class Json {
     }
 
     static Object toBean(JsonObject jo, Class<?> raw) {
-        Object bean = constructBean(raw);
+        Object bean = constructBean(raw, jo);
         try {
             var bi = Introspector.getBeanInfo(raw);
             for (var pd : bi.getPropertyDescriptors()) {
@@ -1166,7 +1171,7 @@ public final class Json {
         }
     }
 
-    static Object constructBean(Class<?> raw) {
+    static Object constructBean(Class<?> raw, JsonObject jo) {
         try {
             Constructor<?> noArg = null, unique = null;
             for (var c : raw.getDeclaredConstructors()) {
@@ -1186,8 +1191,12 @@ public final class Json {
             makeAccessible(unique, raw);
             var params = unique.getParameters();
             Object[] args = new Object[params.length];
-            // fill defaults; will be overwritten via setters if present
-            for (int i = 0; i < params.length; i++) args[i] = defaultValue(params[i].getType());
+            for (int i = 0; i < params.length; i++) {
+                var p = params[i];
+                var v = findPropertyValue(jo, p.getName());
+                if (v == null) args[i] = defaultValue(p.getType());
+                else args[i] = fromJsonValue(v, p.getParameterizedType());
+            }
             return unique.newInstance(args);
         } catch (Exception e) {
             throw e;
