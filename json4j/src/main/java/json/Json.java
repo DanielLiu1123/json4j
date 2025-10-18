@@ -1201,7 +1201,7 @@ public final class Json {
         } catch (Exception e) {
             throw e;
         } catch (java.lang.Exception e) {
-            throw new ConversionException("Failed to instantiate bean of type " + raw.getName());
+            throw new ConversionException("Failed to instantiate bean of type " + raw.getName(), e);
         }
     }
 

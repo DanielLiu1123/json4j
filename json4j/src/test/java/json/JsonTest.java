@@ -380,10 +380,10 @@ class JsonTest {
             assertThat(actual).isEqualTo(expected);
         }
 
+        record Foo(Optional<String> name, Optional<Integer> age) {}
+
         @Test
         void parseRecordOptionalProperties() {
-            record Foo(Optional<String> name, Optional<Integer> age) {}
-
             // @spotless:off
             var table = new Object[][] {
                 {"{\"name\":\"Alice\",\"age\":30}", new Foo(Optional.of("Alice"), Optional.of(30))},
@@ -403,14 +403,14 @@ class JsonTest {
             }));
         }
 
+        @Data
+        static class Bar {
+            private final Optional<String> name;
+            private final Optional<Integer> age;
+        }
+
         @Test
         void parseBeanOptionalProperties() {
-            @Data
-            class Bar {
-                private final Optional<String> name;
-                private final Optional<Integer> age;
-            }
-
             // @spotless:off
             var table2 = new Object[][] {
                     {"{\"name\":\"Alice\",\"age\":30}", new Bar(Optional.of("Alice"), Optional.of(30))},
