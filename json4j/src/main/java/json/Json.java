@@ -7,7 +7,6 @@ import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
-import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.math.BigDecimal;
@@ -62,6 +61,10 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.BaseStream;
 import java.util.stream.DoubleStream;
@@ -623,6 +626,16 @@ public final class Json {
                 else write(optional.get());
                 return;
             }
+            // AtomicBoolean: extract the value and serialize
+            if (o instanceof AtomicBoolean ab) {
+                out.append(ab.get() ? "true" : "false");
+                return;
+            }
+            // AtomicReference: extract the value and serialize
+            if (o instanceof AtomicReference<?> ar) {
+                write(ar.get());
+                return;
+            }
             if (o.getClass().isArray()) {
                 writeArray(o);
                 return;
@@ -989,11 +1002,12 @@ public final class Json {
         // 2) Scalar targets (LOOSE)
 
         // 2.1 boolean: accept JsonBoolean, "true"/"false", "1"/"0", numeric 1/0
-        if (raw == boolean.class || raw == Boolean.class) {
+        if (raw == boolean.class || raw == Boolean.class || raw == AtomicBoolean.class) {
             return (T) toBoolean(jv, raw);
         }
 
         // 2.2 number: accept JsonNumber, numeric strings, and booleans (true->1, false->0)
+        // AtomicInteger and AtomicLong are Number subclasses, so they're handled here
         if (Number.class.isAssignableFrom(raw) || (raw.isPrimitive() && raw != char.class)) {
             return (T) toNumber(jv, raw);
         }
@@ -1030,6 +1044,12 @@ public final class Json {
         // 2.8 optional: wrap the inner type
         if (raw == Optional.class) {
             return (T) toOptional(jv, targetType);
+        }
+
+        // 2.9 AtomicReference: wrap the inner type
+        if (raw == AtomicReference.class) {
+            return (T) new AtomicReference<>(
+                    fromJsonValue(jv, ((ParameterizedType) targetType).getActualTypeArguments()[0]));
         }
 
         // 3) Structured targets (LOOSE)
@@ -1341,6 +1361,7 @@ public final class Json {
     static Object toNull(Class<?> raw) {
         if (raw.isPrimitive()) throw new ConversionException("Cannot assign null to primitive type");
         if (raw == Optional.class) return Optional.empty();
+        if (raw == AtomicReference.class) return new AtomicReference<>(null);
         return null;
     }
 
@@ -1378,6 +1399,7 @@ public final class Json {
         } else throw new ConversionException("Cannot convert " + jv.getClass().getSimpleName() + " to boolean");
 
         if (raw == boolean.class || raw == Boolean.class) return bool;
+        if (raw == AtomicBoolean.class) return new AtomicBoolean(bool);
         throw new ConversionException("Unsupported boolean target type");
     }
 
@@ -1412,6 +1434,8 @@ public final class Json {
         if (raw == int.class || raw == Integer.class) return bd.intValue();
         if (raw == short.class || raw == Short.class) return bd.shortValue();
         if (raw == byte.class || raw == Byte.class) return bd.byteValue();
+        if (raw == AtomicInteger.class) return new AtomicInteger(bd.intValue());
+        if (raw == AtomicLong.class) return new AtomicLong(bd.longValue());
         throw new ConversionException("Unsupported numeric target type");
     }
 

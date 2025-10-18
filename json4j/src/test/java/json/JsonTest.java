@@ -43,6 +43,10 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -93,6 +97,13 @@ class JsonTest {
                     {Optional.of(1), "1"},
                     {Optional.of("str"), "\"str\""},
                     {Optional.empty(), "null"},
+
+                    // Atomic types
+                    {new AtomicInteger(42), "42"},
+                    {new AtomicLong(10000000000L), "10000000000"},
+                    {new AtomicBoolean(true), "true"},
+                    {new AtomicReference<>("hello"), "\"hello\""},
+                    {new AtomicReference<>(null), "null"},
 
                     // Array (handled in Collection/List)
 
@@ -283,6 +294,8 @@ class JsonTest {
                     {"1", new Json.Type<Optional<Boolean>>() {}, Optional.of(true)},
                     {"null", new Json.Type<Optional<String>>() {}, Optional.empty()},
 
+                    // Atomic types (note: will need special handling in test since atomic types don't implement equals)
+
                     // arrays (if non-array provided, wrap single element)
                     {"\"2025-01-01\"", new Json.Type<LocalDate[]>() {}, new LocalDate[] {LocalDate.parse("2025-01-01")}},
 
@@ -378,6 +391,28 @@ class JsonTest {
 
             var actual = Json.parse(input, new Json.Type<Stream<Object>>() {}).toList();
             assertThat(actual).isEqualTo(expected);
+        }
+
+        @Test
+        void parseAtomicTypes() {
+            var table = new Object[][] {
+                {"42", new Json.Type<AtomicInteger>() {}, 42},
+                {"10000000000", new Json.Type<AtomicLong>() {}, 10000000000L},
+                {"true", new Json.Type<AtomicBoolean>() {}, true},
+                {"\"hello\"", new Json.Type<AtomicReference<String>>() {}, "hello"},
+                {"null", new Json.Type<AtomicReference<String>>() {}, null}
+            };
+
+            assertAll(IntStream.range(0, table.length).mapToObj(i -> () -> {
+                var row = table[i];
+                var input = (String) row[0];
+                var type = (Json.Type<?>) row[1];
+                var expected = row[2];
+                var actual = invoke(Json.parse(input, type), "get");
+                assertThat(actual)
+                        .as("Case %d: input=%s, type=%s", i, input, type)
+                        .isEqualTo(expected);
+            }));
         }
 
         record Foo(Optional<String> name, Optional<Integer> age) {}
@@ -477,6 +512,18 @@ class JsonTest {
                         .isInstanceOf(Json.SyntaxException.class)
                         .hasMessageContaining(containsMessage);
             }));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T invoke(Object o, String methodName, Object... args) {
+        var paramTypes = Stream.of(args).map(Object::getClass).toArray(Class[]::new);
+        try {
+            var method = o.getClass().getDeclaredMethod(methodName, paramTypes);
+            method.setAccessible(true);
+            return (T) method.invoke(o, args);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }
