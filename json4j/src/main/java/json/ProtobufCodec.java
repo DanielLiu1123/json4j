@@ -717,75 +717,6 @@ public final class ProtobufCodec implements Json.Codec {
                 + value.getClass().getSimpleName());
     }
 
-    static void scanClasspath(String cp, Map<String, Class<?>> registry) {
-        var file = new File(cp);
-        if (!file.exists()) return;
-        if (file.getName().endsWith(".jar")) {
-            scanJar(file, registry);
-        } else if (file.isDirectory()) {
-            scanDir(file, registry);
-        }
-    }
-
-    static void scanJar(File jar, Map<String, Class<?>> registry) {
-        try (var jarFile = new JarFile(jar)) {
-            var entries = jarFile.entries();
-            while (entries.hasMoreElements()) {
-                var entry = entries.nextElement();
-                var name = entry.getName();
-                if (name.endsWith(".class")) {
-                    String className = name.replace('/', '.').substring(0, name.length() - 6);
-                    registerMessageClass(className, registry);
-                }
-            }
-        } catch (IOException ignored) {
-        }
-    }
-
-    static void scanDir(File dir, Map<String, Class<?>> registry) {
-        if (!dir.exists() || !dir.isDirectory()) return;
-        var files = dir.listFiles();
-        if (files == null) return;
-        for (File file : files) {
-            if (file.isDirectory()) scanDir(file, registry);
-            else if (file.getName().endsWith(".class")) registerMessageClass(className(file), registry);
-        }
-    }
-
-    static String className(File file) {
-        var s = file.getAbsolutePath();
-        var magicPaths = new String[] {
-            File.separator + "java" + File.separator + "main" + File.separator,
-            File.separator + "java" + File.separator + "test" + File.separator,
-        };
-        for (var mp : magicPaths) {
-            var idx = s.indexOf(mp);
-            if (idx != -1) {
-                s = s.substring(idx + mp.length());
-                break;
-            }
-        }
-        return s.replace(File.separatorChar, '.').substring(0, s.length() - 6);
-    }
-
-    static void registerMessageClass(String className, Map<String, Class<?>> registry) {
-        try {
-            if (className.contains("META-INF") || className.contains("module-info")) return;
-            Class<?> clazz =
-                    Class.forName(className, false, Thread.currentThread().getContextClassLoader());
-            if (Message.class.isAssignableFrom(clazz)
-                    && !clazz.isInterface()
-                    && !Modifier.isAbstract(clazz.getModifiers())
-                    && !clazz.getName().endsWith("$Builder")) {
-                Method getDescriptor = clazz.getMethod("getDescriptor");
-                Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
-                String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
-                registry.put(typeUrl, clazz);
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
     static Value toValue(Json.JsonValue value) {
         var builder = Value.newBuilder();
         if (value instanceof Json.JsonNull) builder.setNullValue(NullValue.NULL_VALUE);
@@ -816,6 +747,75 @@ public final class ProtobufCodec implements Json.Codec {
                 scanClasspath(e, registry);
             }
             return registry;
+        }
+
+        static void scanClasspath(String cp, Map<String, Class<?>> registry) {
+            var file = new File(cp);
+            if (!file.exists()) return;
+            if (file.getName().endsWith(".jar")) {
+                scanJar(file, registry);
+            } else if (file.isDirectory()) {
+                scanDir(file, registry);
+            }
+        }
+
+        static void scanJar(File jar, Map<String, Class<?>> registry) {
+            try (var jarFile = new JarFile(jar)) {
+                var entries = jarFile.entries();
+                while (entries.hasMoreElements()) {
+                    var entry = entries.nextElement();
+                    var name = entry.getName();
+                    if (name.endsWith(".class")) {
+                        String className = name.replace('/', '.').substring(0, name.length() - 6);
+                        registerMessageClass(className, registry);
+                    }
+                }
+            } catch (IOException ignored) {
+            }
+        }
+
+        static void scanDir(File dir, Map<String, Class<?>> registry) {
+            if (!dir.exists() || !dir.isDirectory()) return;
+            var files = dir.listFiles();
+            if (files == null) return;
+            for (File file : files) {
+                if (file.isDirectory()) scanDir(file, registry);
+                else if (file.getName().endsWith(".class")) registerMessageClass(className(file), registry);
+            }
+        }
+
+        static String className(File file) {
+            var s = file.getAbsolutePath();
+            var magicPaths = new String[] {
+                File.separator + "java" + File.separator + "main" + File.separator,
+                File.separator + "java" + File.separator + "test" + File.separator,
+            };
+            for (var mp : magicPaths) {
+                var idx = s.indexOf(mp);
+                if (idx != -1) {
+                    s = s.substring(idx + mp.length());
+                    break;
+                }
+            }
+            return s.replace(File.separatorChar, '.').substring(0, s.length() - 6);
+        }
+
+        static void registerMessageClass(String className, Map<String, Class<?>> registry) {
+            try {
+                if (className.contains("META-INF") || className.contains("module-info")) return;
+                Class<?> clazz =
+                        Class.forName(className, false, Thread.currentThread().getContextClassLoader());
+                if (Message.class.isAssignableFrom(clazz)
+                        && !clazz.isInterface()
+                        && !Modifier.isAbstract(clazz.getModifiers())
+                        && !clazz.getName().endsWith("$Builder")) {
+                    Method getDescriptor = clazz.getMethod("getDescriptor");
+                    Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
+                    String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
+                    registry.put(typeUrl, clazz);
+                }
+            } catch (Throwable ignored) {
+            }
         }
     }
 }
