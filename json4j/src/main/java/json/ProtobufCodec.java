@@ -7,6 +7,8 @@ import static json.Json.toCamelCase;
 import static json.Json.toSnakeCase;
 import static json.Json.typeBetween;
 
+import com.google.protobuf.Any;
+import com.google.protobuf.AnyOrBuilder;
 import com.google.protobuf.BoolValue;
 import com.google.protobuf.BoolValueOrBuilder;
 import com.google.protobuf.ByteString;
@@ -38,6 +40,7 @@ import com.google.protobuf.StringValue;
 import com.google.protobuf.StringValueOrBuilder;
 import com.google.protobuf.Struct;
 import com.google.protobuf.StructOrBuilder;
+import com.google.protobuf.Timestamp;
 import com.google.protobuf.TimestampOrBuilder;
 import com.google.protobuf.UInt32Value;
 import com.google.protobuf.UInt32ValueOrBuilder;
@@ -45,7 +48,10 @@ import com.google.protobuf.UInt64Value;
 import com.google.protobuf.UInt64ValueOrBuilder;
 import com.google.protobuf.Value;
 import com.google.protobuf.ValueOrBuilder;
+import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.time.Duration;
 import java.time.Instant;
@@ -55,6 +61,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.jar.JarFile;
 
 /**
  * A codec for serializing and deserializing Protocol Buffers messages to and from JSON.
@@ -86,6 +94,10 @@ public final class ProtobufCodec implements Json.Codec {
     @Override
     public Object deserialize(Json.JsonValue jv, Type targetType) {
         return parseProtobuf(jv, raw(targetType));
+    }
+
+    static Map<String, Class<?>> getTypeRegistry() {
+        return TypeRegistryHolder.INSTANCE;
     }
 
     static boolean isProtobuf(Object o) {
@@ -141,7 +153,10 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static void writeMessageOrBuilder(Json.Writer writer, MessageOrBuilder message) {
-        if (writeWellKnown(writer, message)) return;
+        if (isWellKnown(message.getDescriptorForType().getFullName())) {
+            writer.write(wellKnownToJsonValue(message));
+            return;
+        }
         writer.out.append('{');
         boolean first = true;
         for (var field : message.getDescriptorForType().getFields()) {
@@ -170,6 +185,26 @@ public final class ProtobufCodec implements Json.Codec {
             return field.getContainingOneof() != null && !message.hasField(field);
         }
         return false;
+    }
+
+    static boolean isWellKnown(String fullName) {
+        return fullName.equals(Timestamp.getDescriptor().getFullName())
+                || fullName.equals(com.google.protobuf.Duration.getDescriptor().getFullName())
+                || fullName.equals(StringValue.getDescriptor().getFullName())
+                || fullName.equals(Int32Value.getDescriptor().getFullName())
+                || fullName.equals(Int64Value.getDescriptor().getFullName())
+                || fullName.equals(UInt32Value.getDescriptor().getFullName())
+                || fullName.equals(UInt64Value.getDescriptor().getFullName())
+                || fullName.equals(BoolValue.getDescriptor().getFullName())
+                || fullName.equals(FloatValue.getDescriptor().getFullName())
+                || fullName.equals(DoubleValue.getDescriptor().getFullName())
+                || fullName.equals(BytesValue.getDescriptor().getFullName())
+                || fullName.equals(FieldMask.getDescriptor().getFullName())
+                || fullName.equals(Struct.getDescriptor().getFullName())
+                || fullName.equals(ListValue.getDescriptor().getFullName())
+                || fullName.equals(Value.getDescriptor().getFullName())
+                || fullName.equals(Empty.getDescriptor().getFullName())
+                || fullName.equals(Any.getDescriptor().getFullName());
     }
 
     static void writeEnum(Json.Writer writer, Object e) {
@@ -216,72 +251,122 @@ public final class ProtobufCodec implements Json.Codec {
         return builder;
     }
 
-    static boolean writeWellKnown(Json.Writer writer, MessageOrBuilder message) {
+    static Json.JsonValue wellKnownToJsonValue(MessageOrBuilder message) {
         if (message instanceof TimestampOrBuilder t) {
-            writer.write(Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
-            return true;
+            return new Json.JsonString(
+                    Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
+        } else if (message instanceof DurationOrBuilder d) {
+            return new Json.JsonString(
+                    Duration.ofSeconds(d.getSeconds(), d.getNanos()).toString());
+        } else if (message instanceof StringValueOrBuilder s) {
+            return new Json.JsonString(s.getValue());
+        } else if (message instanceof BytesValueOrBuilder b) {
+            return new Json.JsonString(
+                    Base64.getEncoder().encodeToString(b.getValue().toByteArray()));
+        } else if (message instanceof BoolValueOrBuilder b) {
+            return new Json.JsonBoolean(b.getValue());
+        } else if (message instanceof DoubleValueOrBuilder d) {
+            return new Json.JsonNumber(d.getValue());
+        } else if (message instanceof FloatValueOrBuilder f) {
+            return new Json.JsonNumber(f.getValue());
+        } else if (message instanceof Int32ValueOrBuilder i) {
+            return new Json.JsonNumber(i.getValue());
+        } else if (message instanceof UInt32ValueOrBuilder u32) {
+            return new Json.JsonNumber(u32.getValue());
+        } else if (message instanceof Int64ValueOrBuilder i64) {
+            return new Json.JsonNumber(i64.getValue());
+        } else if (message instanceof UInt64ValueOrBuilder u64) {
+            return new Json.JsonNumber(u64.getValue());
+        } else if (message instanceof FieldMaskOrBuilder mask) {
+            return new Json.JsonString(String.join(",", mask.getPathsList()));
+        } else if (message instanceof StructOrBuilder struct) {
+            return structToJsonObject(struct);
+        } else if (message instanceof ListValueOrBuilder list) {
+            return listToJsonArray(list);
+        } else if (message instanceof ValueOrBuilder value) {
+            return valueToJsonValue(value);
+        } else if (message instanceof EmptyOrBuilder) {
+            return new Json.JsonObject(Map.of());
+        } else if (message instanceof AnyOrBuilder any) {
+            var clz = getTypeRegistry().get(any.getTypeUrl());
+            if (clz == null)
+                throw new Json.WriteException("Type not found in registry: " + any.getTypeUrl()
+                        + ". Make sure the message type is on the classpath.");
+            Message msg;
+            try {
+                msg = newBuilder(clz).mergeFrom(any.getValue()).build();
+            } catch (Exception e) {
+                throw new Json.WriteException("Failed to serialize Any type: " + any.getTypeUrl(), e);
+            }
+            var fields = new LinkedHashMap<String, Json.JsonValue>();
+            fields.put("@type", new Json.JsonString(any.getTypeUrl()));
+            var jsonValue = messageToJsonValue(msg);
+            if (jsonValue instanceof Json.JsonObject obj) {
+                fields.putAll(obj.value());
+            } else {
+                fields.put("value", jsonValue);
+            }
+            return new Json.JsonObject(fields);
+        } else {
+            throw new Json.WriteException("Unsupported well-known protobuf type: "
+                    + message.getClass().getName());
         }
-        if (message instanceof DurationOrBuilder d) {
-            writer.write(Duration.ofSeconds(d.getSeconds(), d.getNanos()).toString());
-            return true;
+    }
+
+    static Json.JsonValue messageToJsonValue(MessageOrBuilder message) {
+        if (isWellKnown(message.getDescriptorForType().getFullName())) {
+            return wellKnownToJsonValue(message);
         }
-        if (message instanceof StringValueOrBuilder s) {
-            writer.write(s.getValue());
-            return true;
+
+        var descriptor = message.getDescriptorForType();
+        // For regular messages, serialize all fields to a JSON object
+        Map<String, Json.JsonValue> fields =
+                new LinkedHashMap<>(Json.mapCap(descriptor.getFields().size()));
+        for (var field : descriptor.getFields()) {
+            if (unsetOptionalField(message, field)) {
+                continue;
+            }
+            var v = invokeGetter(message, field);
+            fields.put(field.getJsonName(), convertFieldValue(v, field));
         }
-        if (message instanceof BytesValueOrBuilder b) {
-            writer.write(Base64.getEncoder().encodeToString(b.getValue().toByteArray()));
-            return true;
+        return new Json.JsonObject(fields);
+    }
+
+    static Json.JsonValue convertFieldValue(Object value, Descriptors.FieldDescriptor field) {
+        if (field.isMapField()) {
+            Map<String, Json.JsonValue> map = new LinkedHashMap<>();
+            for (var entry : ((Map<?, ?>) value).entrySet()) {
+                Json.JsonValue key = convertSingleValue(
+                        entry.getKey(), field.getMessageType().findFieldByNumber(1));
+                Json.JsonValue val = convertSingleValue(
+                        entry.getValue(), field.getMessageType().findFieldByNumber(2));
+                map.put(Json.toString(key), val);
+            }
+            return new Json.JsonObject(map);
+        } else if (field.isRepeated()) {
+            List<Json.JsonValue> list = new ArrayList<>();
+            for (Object item : (List<?>) value) {
+                list.add(convertSingleValue(item, field));
+            }
+            return new Json.JsonArray(list);
+        } else {
+            return convertSingleValue(value, field);
         }
-        if (message instanceof BoolValueOrBuilder b) {
-            writer.write(b.getValue());
-            return true;
-        }
-        if (message instanceof DoubleValueOrBuilder d) {
-            writer.write(d.getValue());
-            return true;
-        }
-        if (message instanceof FloatValueOrBuilder f) {
-            writer.write(f.getValue());
-            return true;
-        }
-        if (message instanceof Int32ValueOrBuilder i) {
-            writer.write(i.getValue());
-            return true;
-        }
-        if (message instanceof UInt32ValueOrBuilder u32) {
-            writer.write(u32.getValue());
-            return true;
-        }
-        if (message instanceof Int64ValueOrBuilder i64) {
-            writer.write(i64.getValue());
-            return true;
-        }
-        if (message instanceof UInt64ValueOrBuilder u64) {
-            writer.write(u64.getValue());
-            return true;
-        }
-        if (message instanceof FieldMaskOrBuilder mask) {
-            writer.write(String.join(",", mask.getPathsList()));
-            return true;
-        }
-        if (message instanceof StructOrBuilder struct) {
-            writer.write(structToJsonObject(struct));
-            return true;
-        }
-        if (message instanceof ListValueOrBuilder list) {
-            writer.write(listToJsonArray(list));
-            return true;
-        }
-        if (message instanceof ValueOrBuilder value) {
-            writer.write(valueToJsonValue(value));
-            return true;
-        }
-        if (message instanceof EmptyOrBuilder) {
-            writer.write(new Json.JsonObject(Map.of()));
-            return true;
-        }
-        return false;
+    }
+
+    static Json.JsonValue convertSingleValue(Object value, Descriptors.FieldDescriptor field) {
+        return switch (field.getType()) {
+            case INT32, SINT32, SFIXED32, UINT32, FIXED32 -> new Json.JsonNumber((Integer) value);
+            case INT64, SINT64, SFIXED64, UINT64, FIXED64 -> new Json.JsonNumber((Long) value);
+            case FLOAT -> new Json.JsonNumber((Float) value);
+            case DOUBLE -> new Json.JsonNumber((Double) value);
+            case BOOL -> new Json.JsonBoolean((Boolean) value);
+            case STRING -> new Json.JsonString((String) value);
+            case BYTES -> new Json.JsonString(Base64.getEncoder().encodeToString(((ByteString) value).toByteArray()));
+            case ENUM -> new Json.JsonString(((Enum<?>) value).name());
+            case MESSAGE -> messageToJsonValue((MessageOrBuilder) value);
+            case GROUP -> throw new Json.WriteException("Group type is not supported in protobuf JSON serialization");
+        };
     }
 
     static Json.JsonObject structToJsonObject(StructOrBuilder struct) {
@@ -341,7 +426,7 @@ public final class ProtobufCodec implements Json.Codec {
         }
     }
 
-    static java.lang.reflect.Type getterType(Message.Builder builder, Descriptors.FieldDescriptor field) {
+    static Type getterType(Message.Builder builder, Descriptors.FieldDescriptor field) {
         var getterMethodName = getterMethodName(field);
         try {
             var m = builder.getClass().getMethod(getterMethodName);
@@ -428,7 +513,7 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static boolean mergeWellKnown(Json.JsonValue json, Message.Builder builder) {
-        if (builder instanceof com.google.protobuf.Timestamp.Builder timestamp) {
+        if (builder instanceof Timestamp.Builder timestamp) {
             Instant instant = fromJsonValue(json, Instant.class);
             timestamp.setSeconds(instant.getEpochSecond());
             timestamp.setNanos(instant.getNano());
@@ -500,7 +585,56 @@ public final class ProtobufCodec implements Json.Codec {
         if (builder instanceof Empty.Builder) {
             return true;
         }
+        if (builder instanceof Any.Builder any) {
+            parseAny(expectObject(json), any);
+            return true;
+        }
         return false;
+    }
+
+    static void parseAny(Json.JsonObject jo, Any.Builder anyBuilder) {
+        Json.JsonValue typeValue = jo.value().get("@type");
+        if (typeValue == null) throw new Json.ConversionException("Any type must have @type field");
+        if (!(typeValue instanceof Json.JsonString typeStr))
+            throw new Json.ConversionException("@type field must be a string");
+
+        String typeUrl = typeStr.value();
+        Class<?> messageClass = getTypeRegistry().get(typeUrl);
+        if (messageClass == null)
+            throw new Json.ConversionException(
+                    "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
+
+        try {
+            // Create a JSON object with all fields except @type
+            Map<String, Json.JsonValue> fields = new LinkedHashMap<>();
+            for (var entry : jo.value().entrySet()) {
+                if (!entry.getKey().equals("@type")) {
+                    fields.put(entry.getKey(), entry.getValue());
+                }
+            }
+
+            // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
+            String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
+
+            // If it's a well-known type with only a "value" field, use it directly
+            Json.JsonValue valueToDeserialize;
+            if (isWellKnown(fullName) && fields.size() == 1 && fields.containsKey("value")) {
+                valueToDeserialize = fields.get("value");
+            } else {
+                valueToDeserialize = new Json.JsonObject(fields);
+            }
+
+            // Parse the nested message using the actual Message class
+            Message.Builder builder = newBuilder(messageClass);
+            mergeIntoBuilder(valueToDeserialize, builder);
+            Message nestedMessage = builder.build();
+
+            // Pack into Any
+            anyBuilder.setTypeUrl(typeUrl);
+            anyBuilder.setValue(nestedMessage.toByteString());
+        } catch (Exception e) {
+            throw new Json.ConversionException("Failed to deserialize Any type: " + typeUrl, e);
+        }
     }
 
     static Object parseEnum(Json.JsonValue jv, Class<?> raw) {
@@ -583,6 +717,75 @@ public final class ProtobufCodec implements Json.Codec {
                 + value.getClass().getSimpleName());
     }
 
+    static void scanClasspath(String cp, Map<String, Class<?>> registry) {
+        var file = new File(cp);
+        if (!file.exists()) return;
+        if (file.getName().endsWith(".jar")) {
+            scanJar(file, registry);
+        } else if (file.isDirectory()) {
+            scanDir(file, registry);
+        }
+    }
+
+    static void scanJar(File jar, Map<String, Class<?>> registry) {
+        try (var jarFile = new JarFile(jar)) {
+            var entries = jarFile.entries();
+            while (entries.hasMoreElements()) {
+                var entry = entries.nextElement();
+                var name = entry.getName();
+                if (name.endsWith(".class")) {
+                    String className = name.replace('/', '.').substring(0, name.length() - 6);
+                    registerMessageClass(className, registry);
+                }
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
+    static void scanDir(File dir, Map<String, Class<?>> registry) {
+        if (!dir.exists() || !dir.isDirectory()) return;
+        var files = dir.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            if (file.isDirectory()) scanDir(file, registry);
+            else if (file.getName().endsWith(".class")) registerMessageClass(className(file), registry);
+        }
+    }
+
+    static String className(File file) {
+        var s = file.getAbsolutePath();
+        var magicPaths = new String[] {
+            File.separator + "java" + File.separator + "main" + File.separator,
+            File.separator + "java" + File.separator + "test" + File.separator,
+        };
+        for (var mp : magicPaths) {
+            var idx = s.indexOf(mp);
+            if (idx != -1) {
+                s = s.substring(idx + mp.length());
+                break;
+            }
+        }
+        return s.replace(File.separatorChar, '.').substring(0, s.length() - 6);
+    }
+
+    static void registerMessageClass(String className, Map<String, Class<?>> registry) {
+        try {
+            if (className.contains("META-INF") || className.contains("module-info")) return;
+            Class<?> clazz =
+                    Class.forName(className, false, Thread.currentThread().getContextClassLoader());
+            if (Message.class.isAssignableFrom(clazz)
+                    && !clazz.isInterface()
+                    && !Modifier.isAbstract(clazz.getModifiers())
+                    && !clazz.getName().endsWith("$Builder")) {
+                Method getDescriptor = clazz.getMethod("getDescriptor");
+                Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
+                String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
+                registry.put(typeUrl, clazz);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     static Value toValue(Json.JsonValue value) {
         var builder = Value.newBuilder();
         if (value instanceof Json.JsonNull) builder.setNullValue(NullValue.NULL_VALUE);
@@ -600,5 +803,19 @@ public final class ProtobufCodec implements Json.Codec {
             builder.setListValue(lb.build());
         }
         return builder.build();
+    }
+
+    private static class TypeRegistryHolder {
+        private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
+
+        private static Map<String, Class<?>> initializeRegistry() {
+            String cp = System.getProperty("java.class.path");
+            if (cp == null || cp.isBlank()) return Map.of();
+            Map<String, Class<?>> registry = new ConcurrentHashMap<>();
+            for (String e : cp.split(File.pathSeparator)) {
+                scanClasspath(e, registry);
+            }
+            return registry;
+        }
     }
 }

@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
+import com.google.protobuf.Any;
 import com.google.protobuf.BoolValue;
 import com.google.protobuf.Int32Value;
 import com.google.protobuf.ListValue;
 import com.google.protobuf.NullValue;
 import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
+import com.google.protobuf.util.Timestamps;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
@@ -165,7 +167,9 @@ class JsonTest {
 
                     // Protobuf support (codec)
                     {User.newBuilder().setId(1).setName("Freeman").setStatus(User.Status.ACTIVE).addAllHobbyList(List.of(Hobby.newBuilder().setId(1).setName("gaming").build())).putAllHobbyMap(Map.of(1L, Hobby.newBuilder().setId(1).setName("gaming").build())).build(), "{\"id\":1,\"name\":\"Freeman\",\"status\":\"ACTIVE\",\"hobbyList\":[{\"id\":1,\"name\":\"gaming\"}],\"hobbyMap\":{\"1\":{\"id\":1,\"name\":\"gaming\"}}}"},
-                    {User.newBuilder().build(), "{\"id\":0,\"name\":\"\",\"status\":\"STATUS_UNSPECIFIED\",\"hobbyList\":[],\"hobbyMap\":{}}"}
+                    {User.newBuilder().build(), "{\"id\":0,\"name\":\"\",\"status\":\"STATUS_UNSPECIFIED\",\"hobbyList\":[],\"hobbyMap\":{}}"},
+                    {Any.pack(Timestamps.parse("2025-10-19T03:29:19.500Z")), "{\"@type\":\"type.googleapis.com/google.protobuf.Timestamp\",\"value\":\"2025-10-19T03:29:19.500Z\"}"},
+                    {Any.pack(User.newBuilder().setId(1).setName("Freeman").build()), "{\"@type\":\"type.googleapis.com/json4j.user.User\",\"id\":1,\"name\":\"Freeman\",\"status\":\"STATUS_UNSPECIFIED\",\"hobbyList\":[],\"hobbyMap\":{}}"}
             };
             // @spotless:on
 
@@ -354,7 +358,9 @@ class JsonTest {
                     {"[1,true,\"str\"]", new Json.Type<ListValue>() {}, ListValue.newBuilder().addValues(Value.newBuilder().setNumberValue(1).build()).addValues(Value.newBuilder().setBoolValue(true).build()).addValues(Value.newBuilder().setStringValue("str").build()).build()},
                     {"[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<List<User>>() {}, List.of(User.newBuilder().setId(1).setName("Freeman").build())},
                     {"[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<User[]>() {}, new User[] {User.newBuilder().setId(1).setName("Freeman").build()}},
-                    {"[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<ListValue>() {}, ListValue.newBuilder().addValues(Value.newBuilder().setStructValue(Struct.newBuilder().putFields("id", Value.newBuilder().setNumberValue(1).build()).putFields("name", Value.newBuilder().setStringValue("Freeman").build()).build()).build()).build()}
+                    {"[{\"id\":1,\"name\":\"Freeman\"}]", new Json.Type<ListValue>() {}, ListValue.newBuilder().addValues(Value.newBuilder().setStructValue(Struct.newBuilder().putFields("id", Value.newBuilder().setNumberValue(1).build()).putFields("name", Value.newBuilder().setStringValue("Freeman").build()).build()).build()).build()},
+                    {"{\"@type\":\"type.googleapis.com/google.protobuf.Timestamp\",\"value\":\"2025-10-19T03:29:19.500Z\"}", new Json.Type<Any>() {}, Any.pack(Timestamps.parse("2025-10-19T03:29:19.500Z"))},
+                    {"{\"@type\":\"type.googleapis.com/json4j.user.User\",\"id\":1,\"name\":\"Freeman\",\"status\":\"STATUS_UNSPECIFIED\",\"hobbyList\":[],\"hobbyMap\":{}}", new Json.Type<Any>() {}, Any.pack(User.newBuilder().setId(1).setName("Freeman").build())}
             };
             // @spotless:on
 
