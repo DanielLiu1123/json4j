@@ -53,19 +53,15 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
-import java.net.JarURLConnection;
-import java.net.URL;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 /**
@@ -77,12 +73,11 @@ import java.util.jar.JarFile;
 public final class ProtobufCodec implements Json.Codec {
 
     private static final boolean PROTOBUF_PRESENT = isClassPresent("com.google.protobuf.Message");
-    private static final Map<String, Descriptors.Descriptor> TYPE_REGISTRY = new ConcurrentHashMap<>();
-    private static final Map<String, Class<? extends Message>> TYPE_CLASS_REGISTRY = new ConcurrentHashMap<>();
+    private static final Map<String, Class<?>> TYPE_CLASS_REGISTRY = new ConcurrentHashMap<>();
 
     static {
         if (PROTOBUF_PRESENT) {
-            initializeTypeRegistry();
+            initTypeRegistry();
         }
     }
 
@@ -613,7 +608,7 @@ public final class ProtobufCodec implements Json.Codec {
         }
 
         String typeUrl = typeStr.value();
-        Class<? extends Message> messageClass = TYPE_CLASS_REGISTRY.get(typeUrl);
+        Class<?> messageClass = TYPE_CLASS_REGISTRY.get(typeUrl);
 
         if (messageClass == null) {
             throw new Json.ConversionException(
@@ -730,91 +725,67 @@ public final class ProtobufCodec implements Json.Codec {
                 + value.getClass().getSimpleName());
     }
 
-    /**
-     * Initialize the type registry by scanning the classpath for all protobuf Message types.
-     * This allows automatic handling of Any types without manual TypeRegistry configuration.
-     */
-    private static void initializeTypeRegistry() {
-        try {
-            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            if (classLoader == null) {
-                classLoader = ProtobufCodec.class.getClassLoader();
-            }
-
-            // Scan common protobuf packages
-            String[] packagesToScan = {"com.google", "json4j"};
-            for (String pkg : packagesToScan) {
-                scanPackage(classLoader, pkg);
-            }
-        } catch (Exception e) {
-            // Silently ignore - type registry will just be empty
-            // Any types that aren't registered will fail at runtime with a clear error
+    static void initTypeRegistry() {
+        String cp = System.getProperty("java.class.path");
+        for (String e : cp.split(File.pathSeparator)) {
+            scanClasspath(e);
         }
     }
 
-    private static void scanPackage(ClassLoader classLoader, String packageName) {
-        try {
-            String path = packageName.replace('.', '/');
-            Enumeration<URL> resources = classLoader.getResources(path);
-
-            while (resources.hasMoreElements()) {
-                URL resource = resources.nextElement();
-                if (resource.getProtocol().equals("jar")) {
-                    scanJar(resource, packageName);
-                } else if (resource.getProtocol().equals("file")) {
-                    scanDirectory(new File(resource.getFile()), packageName);
-                }
-            }
-        } catch (IOException e) {
-            // Silently ignore
+    static void scanClasspath(String cp) {
+        var file = new File(cp);
+        if (!file.exists()) return;
+        if (file.getName().endsWith(".jar")) {
+            scanJar(file);
+        } else if (file.isDirectory()) {
+            scanDir(file);
         }
     }
 
-    private static void scanJar(URL resource, String packageName) {
-        try {
-            JarURLConnection connection = (JarURLConnection) resource.openConnection();
-            JarFile jarFile = connection.getJarFile();
-            Enumeration<JarEntry> entries = jarFile.entries();
-
+    static void scanJar(File jar) {
+        try (var jarFile = new JarFile(jar)) {
+            var entries = jarFile.entries();
             while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                String name = entry.getName();
-
-                if (name.endsWith(".class") && name.startsWith(packageName.replace('.', '/'))) {
+                var entry = entries.nextElement();
+                var name = entry.getName();
+                if (name.endsWith(".class")) {
                     String className = name.replace('/', '.').substring(0, name.length() - 6);
                     registerMessageClass(className);
                 }
             }
-        } catch (IOException e) {
-            // Silently ignore
+        } catch (IOException ignored) {
         }
     }
 
-    private static void scanDirectory(File directory, String packageName) {
-        if (!directory.exists() || !directory.isDirectory()) {
-            return;
-        }
-
-        File[] files = directory.listFiles();
-        if (files == null) {
-            return;
-        }
-
+    static void scanDir(File dir) {
+        if (!dir.exists() || !dir.isDirectory()) return;
+        var files = dir.listFiles();
+        if (files == null) return;
         for (File file : files) {
-            if (file.isDirectory()) {
-                scanDirectory(file, packageName + "." + file.getName());
-            } else if (file.getName().endsWith(".class")) {
-                String className = packageName
-                        + '.'
-                        + file.getName().substring(0, file.getName().length() - 6);
-                registerMessageClass(className);
+            if (file.isDirectory()) scanDir(file);
+            else if (file.getName().endsWith(".class")) registerMessageClass(className(file));
+        }
+    }
+
+    static String className(File file) {
+        var s = file.getAbsolutePath();
+        var magicPaths = new String[] {
+            File.separator + "java" + File.separator + "main" + File.separator,
+            File.separator + "java" + File.separator + "test" + File.separator,
+        };
+        for (var mp : magicPaths) {
+            var idx = s.indexOf(mp);
+            if (idx != -1) {
+                s = s.substring(idx + mp.length());
+                break;
             }
         }
+        return s.replace(File.separatorChar, '.').substring(0, s.length() - 6);
     }
 
-    @SuppressWarnings("unchecked")
-    private static void registerMessageClass(String className) {
+    static void registerMessageClass(String className) {
         try {
+            if (className.contains("META-INF") || className.contains("module-info")) return;
             Class<?> clazz =
                     Class.forName(className, false, Thread.currentThread().getContextClassLoader());
             if (Message.class.isAssignableFrom(clazz)
@@ -824,10 +795,9 @@ public final class ProtobufCodec implements Json.Codec {
                 Method getDescriptor = clazz.getMethod("getDescriptor");
                 Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
                 String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
-                TYPE_REGISTRY.put(typeUrl, descriptor);
-                TYPE_CLASS_REGISTRY.put(typeUrl, (Class<? extends Message>) clazz);
+                TYPE_CLASS_REGISTRY.put(typeUrl, clazz);
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
     }
 
