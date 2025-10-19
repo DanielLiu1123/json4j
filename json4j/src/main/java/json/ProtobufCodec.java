@@ -393,8 +393,9 @@ public final class ProtobufCodec implements Json.Codec {
         // For regular messages, serialize all fields to a JSON object
         Map<String, Json.JsonValue> fieldMap = new LinkedHashMap<>();
         for (var field : descriptor.getFields()) {
-            if (!message.hasField(field)) {
-                continue; // Skip unset fields
+            // Use the same logic as unsetOptionalField to skip fields
+            if (unsetOptionalField(message, field)) {
+                continue;
             }
             Object fieldValue = message.getField(field);
             fieldMap.put(field.getJsonName(), convertFieldValue(fieldValue, field));
