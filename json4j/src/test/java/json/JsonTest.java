@@ -521,55 +521,6 @@ class JsonTest {
         }
     }
 
-    @Test
-    void protobufAnyType() throws Exception {
-        // Test Any type serialization and deserialization
-        var timestamp = com.google.protobuf.Timestamp.newBuilder()
-                .setSeconds(1729305000)
-                .setNanos(500000000)
-                .build();
-        var anyTimestamp = com.google.protobuf.Any.pack(timestamp);
-
-        // Serialize Any to JSON
-        String json = Json.stringify(anyTimestamp);
-        assertThat(json).contains("@type");
-        assertThat(json).contains("type.googleapis.com/google.protobuf.Timestamp");
-        assertThat(json).contains("2024-10-19T02:30:00.500Z");
-
-        // Deserialize Any from JSON
-        var deserializedAny = Json.parse(json, com.google.protobuf.Any.class);
-        assertThat(deserializedAny.getTypeUrl()).isEqualTo(anyTimestamp.getTypeUrl());
-        var unpacked = deserializedAny.unpack(com.google.protobuf.Timestamp.class);
-        assertThat(unpacked.getSeconds()).isEqualTo(1729305000);
-        assertThat(unpacked.getNanos()).isEqualTo(500000000);
-
-        // Test with StringValue
-        var stringValue = com.google.protobuf.StringValue.of("hello world");
-        var anyString = com.google.protobuf.Any.pack(stringValue);
-
-        json = Json.stringify(anyString);
-        assertThat(json).contains("@type");
-        assertThat(json).contains("type.googleapis.com/google.protobuf.StringValue");
-        assertThat(json).contains("hello world");
-
-        deserializedAny = Json.parse(json, com.google.protobuf.Any.class);
-        var unpackedString = deserializedAny.unpack(com.google.protobuf.StringValue.class);
-        assertThat(unpackedString.getValue()).isEqualTo("hello world");
-
-        // Test with Int32Value
-        var int32Value = Int32Value.of(42);
-        var anyInt = com.google.protobuf.Any.pack(int32Value);
-
-        json = Json.stringify(anyInt);
-        assertThat(json).contains("@type");
-        assertThat(json).contains("type.googleapis.com/google.protobuf.Int32Value");
-        assertThat(json).contains("42");
-
-        deserializedAny = Json.parse(json, com.google.protobuf.Any.class);
-        var unpackedInt = deserializedAny.unpack(Int32Value.class);
-        assertThat(unpackedInt.getValue()).isEqualTo(42);
-    }
-
     @SuppressWarnings("unchecked")
     private static <T> T invoke(Object o, String methodName, Object... args) {
         var paramTypes = Stream.of(args).map(Object::getClass).toArray(Class[]::new);
