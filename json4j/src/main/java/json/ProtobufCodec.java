@@ -73,32 +73,6 @@ import java.util.jar.JarFile;
 public final class ProtobufCodec implements Json.Codec {
 
     private static final boolean PROTOBUF_PRESENT = isClassPresent("com.google.protobuf.Message");
-    /**
-     * Lazy-initialized registry holder using the Initialization-on-demand holder idiom.
-     * This ensures thread-safe lazy loading - the registry is only initialized when first accessed.
-     */
-    private static class TypeRegistryHolder {
-        private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
-
-        private static Map<String, Class<?>> initializeRegistry() {
-            Map<String, Class<?>> registry = new ConcurrentHashMap<>();
-            if (!PROTOBUF_PRESENT) {
-                return registry;
-            }
-            String cp = System.getProperty("java.class.path");
-            for (String e : cp.split(File.pathSeparator)) {
-                scanClasspath(e, registry);
-            }
-            return registry;
-        }
-    }
-
-    /**
-     * Gets the type registry, initializing it on first access.
-     */
-    private static Map<String, Class<?>> getTypeRegistry() {
-        return TypeRegistryHolder.INSTANCE;
-    }
 
     public ProtobufCodec() {}
 
@@ -120,6 +94,10 @@ public final class ProtobufCodec implements Json.Codec {
     @Override
     public Object deserialize(Json.JsonValue jv, Type targetType) {
         return parseProtobuf(jv, raw(targetType));
+    }
+
+    static Map<String, Class<?>> getTypeRegistry() {
+        return TypeRegistryHolder.INSTANCE;
     }
 
     static boolean isProtobuf(Object o) {
@@ -635,9 +613,12 @@ public final class ProtobufCodec implements Json.Codec {
                 }
             }
 
-            // If there's only a "value" field, use it directly (for well-known types)
+            // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
+            String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
+
+            // If it's a well-known type with only a "value" field, use it directly
             Json.JsonValue valueToDeserialize;
-            if (fields.size() == 1 && fields.containsKey("value")) {
+            if (isWellKnown(fullName) && fields.size() == 1 && fields.containsKey("value")) {
                 valueToDeserialize = fields.get("value");
             } else {
                 valueToDeserialize = new Json.JsonObject(fields);
@@ -822,5 +803,19 @@ public final class ProtobufCodec implements Json.Codec {
             builder.setListValue(lb.build());
         }
         return builder.build();
+    }
+
+    private static class TypeRegistryHolder {
+        private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
+
+        private static Map<String, Class<?>> initializeRegistry() {
+            String cp = System.getProperty("java.class.path");
+            if (cp == null || cp.isBlank()) return Map.of();
+            Map<String, Class<?>> registry = new ConcurrentHashMap<>();
+            for (String e : cp.split(File.pathSeparator)) {
+                scanClasspath(e, registry);
+            }
+            return registry;
+        }
     }
 }
