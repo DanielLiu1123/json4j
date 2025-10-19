@@ -40,6 +40,7 @@ import com.google.protobuf.StringValue;
 import com.google.protobuf.StringValueOrBuilder;
 import com.google.protobuf.Struct;
 import com.google.protobuf.StructOrBuilder;
+import com.google.protobuf.Timestamp;
 import com.google.protobuf.TimestampOrBuilder;
 import com.google.protobuf.UInt32Value;
 import com.google.protobuf.UInt32ValueOrBuilder;
@@ -160,7 +161,10 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static void writeMessageOrBuilder(Json.Writer writer, MessageOrBuilder message) {
-        if (writeWellKnown(writer, message)) return;
+        if (isWellKnown(message.getDescriptorForType().getFullName())) {
+            writer.write(wellKnownToJsonValue(message));
+            return;
+        }
         writer.out.append('{');
         boolean first = true;
         for (var field : message.getDescriptorForType().getFields()) {
@@ -191,30 +195,24 @@ public final class ProtobufCodec implements Json.Codec {
         return false;
     }
 
-    /**
-     * Check if the given full name represents a well-known protobuf type.
-     *
-     * @param fullName the full name of the protobuf type (e.g., "google.protobuf.Timestamp")
-     * @return true if the type is a well-known protobuf type, false otherwise
-     */
     static boolean isWellKnown(String fullName) {
-        return fullName.equals("google.protobuf.Timestamp")
-                || fullName.equals("google.protobuf.Duration")
-                || fullName.equals("google.protobuf.StringValue")
-                || fullName.equals("google.protobuf.Int32Value")
-                || fullName.equals("google.protobuf.Int64Value")
-                || fullName.equals("google.protobuf.UInt32Value")
-                || fullName.equals("google.protobuf.UInt64Value")
-                || fullName.equals("google.protobuf.BoolValue")
-                || fullName.equals("google.protobuf.FloatValue")
-                || fullName.equals("google.protobuf.DoubleValue")
-                || fullName.equals("google.protobuf.BytesValue")
-                || fullName.equals("google.protobuf.FieldMask")
-                || fullName.equals("google.protobuf.Struct")
-                || fullName.equals("google.protobuf.ListValue")
-                || fullName.equals("google.protobuf.Value")
-                || fullName.equals("google.protobuf.Any")
-                || fullName.equals("google.protobuf.Empty");
+        return fullName.equals(Timestamp.getDescriptor().getFullName())
+                || fullName.equals(com.google.protobuf.Duration.getDescriptor().getFullName())
+                || fullName.equals(StringValue.getDescriptor().getFullName())
+                || fullName.equals(Int32Value.getDescriptor().getFullName())
+                || fullName.equals(Int64Value.getDescriptor().getFullName())
+                || fullName.equals(UInt32Value.getDescriptor().getFullName())
+                || fullName.equals(UInt64Value.getDescriptor().getFullName())
+                || fullName.equals(BoolValue.getDescriptor().getFullName())
+                || fullName.equals(FloatValue.getDescriptor().getFullName())
+                || fullName.equals(DoubleValue.getDescriptor().getFullName())
+                || fullName.equals(BytesValue.getDescriptor().getFullName())
+                || fullName.equals(FieldMask.getDescriptor().getFullName())
+                || fullName.equals(Struct.getDescriptor().getFullName())
+                || fullName.equals(ListValue.getDescriptor().getFullName())
+                || fullName.equals(Value.getDescriptor().getFullName())
+                || fullName.equals(Empty.getDescriptor().getFullName())
+                || fullName.equals(Any.getDescriptor().getFullName());
     }
 
     static void writeEnum(Json.Writer writer, Object e) {
@@ -261,179 +259,99 @@ public final class ProtobufCodec implements Json.Codec {
         return builder;
     }
 
-    static boolean writeWellKnown(Json.Writer writer, MessageOrBuilder message) {
+    static Json.JsonValue wellKnownToJsonValue(MessageOrBuilder message) {
         if (message instanceof TimestampOrBuilder t) {
-            writer.write(Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
-            return true;
-        }
-        if (message instanceof DurationOrBuilder d) {
-            writer.write(Duration.ofSeconds(d.getSeconds(), d.getNanos()).toString());
-            return true;
-        }
-        if (message instanceof StringValueOrBuilder s) {
-            writer.write(s.getValue());
-            return true;
-        }
-        if (message instanceof BytesValueOrBuilder b) {
-            writer.write(Base64.getEncoder().encodeToString(b.getValue().toByteArray()));
-            return true;
-        }
-        if (message instanceof BoolValueOrBuilder b) {
-            writer.write(b.getValue());
-            return true;
-        }
-        if (message instanceof DoubleValueOrBuilder d) {
-            writer.write(d.getValue());
-            return true;
-        }
-        if (message instanceof FloatValueOrBuilder f) {
-            writer.write(f.getValue());
-            return true;
-        }
-        if (message instanceof Int32ValueOrBuilder i) {
-            writer.write(i.getValue());
-            return true;
-        }
-        if (message instanceof UInt32ValueOrBuilder u32) {
-            writer.write(u32.getValue());
-            return true;
-        }
-        if (message instanceof Int64ValueOrBuilder i64) {
-            writer.write(i64.getValue());
-            return true;
-        }
-        if (message instanceof UInt64ValueOrBuilder u64) {
-            writer.write(u64.getValue());
-            return true;
-        }
-        if (message instanceof FieldMaskOrBuilder mask) {
-            writer.write(String.join(",", mask.getPathsList()));
-            return true;
-        }
-        if (message instanceof StructOrBuilder struct) {
-            writer.write(structToJsonObject(struct));
-            return true;
-        }
-        if (message instanceof ListValueOrBuilder list) {
-            writer.write(listToJsonArray(list));
-            return true;
-        }
-        if (message instanceof ValueOrBuilder value) {
-            writer.write(valueToJsonValue(value));
-            return true;
-        }
-        if (message instanceof AnyOrBuilder any) {
-            writeAny(writer, any);
-            return true;
-        }
-        if (message instanceof EmptyOrBuilder) {
-            writer.write(new Json.JsonObject(Map.of()));
-            return true;
-        }
-        return false;
-    }
-
-    static void writeAny(Json.Writer writer, AnyOrBuilder any) {
-        Map<String, Json.JsonValue> map = new LinkedHashMap<>();
-        map.put("@type", new Json.JsonString(any.getTypeUrl()));
-
-        try {
-            // Unpack the Any and serialize the nested message
-            String typeUrl = any.getTypeUrl();
-            Descriptors.Descriptor descriptor = TYPE_REGISTRY.get(typeUrl);
-
-            if (descriptor == null) {
-                throw new Json.ConversionException(
-                        "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
+            return new Json.JsonString(
+                    Instant.ofEpochSecond(t.getSeconds(), t.getNanos()).toString());
+        } else if (message instanceof DurationOrBuilder d) {
+            return new Json.JsonString(
+                    Duration.ofSeconds(d.getSeconds(), d.getNanos()).toString());
+        } else if (message instanceof StringValueOrBuilder s) {
+            return new Json.JsonString(s.getValue());
+        } else if (message instanceof BytesValueOrBuilder b) {
+            return new Json.JsonString(
+                    Base64.getEncoder().encodeToString(b.getValue().toByteArray()));
+        } else if (message instanceof BoolValueOrBuilder b) {
+            return new Json.JsonBoolean(b.getValue());
+        } else if (message instanceof DoubleValueOrBuilder d) {
+            return new Json.JsonNumber(d.getValue());
+        } else if (message instanceof FloatValueOrBuilder f) {
+            return new Json.JsonNumber(f.getValue());
+        } else if (message instanceof Int32ValueOrBuilder i) {
+            return new Json.JsonNumber(i.getValue());
+        } else if (message instanceof UInt32ValueOrBuilder u32) {
+            return new Json.JsonNumber(u32.getValue());
+        } else if (message instanceof Int64ValueOrBuilder i64) {
+            return new Json.JsonNumber(i64.getValue());
+        } else if (message instanceof UInt64ValueOrBuilder u64) {
+            return new Json.JsonNumber(u64.getValue());
+        } else if (message instanceof FieldMaskOrBuilder mask) {
+            return new Json.JsonString(String.join(",", mask.getPathsList()));
+        } else if (message instanceof StructOrBuilder struct) {
+            return structToJsonObject(struct);
+        } else if (message instanceof ListValueOrBuilder list) {
+            return listToJsonArray(list);
+        } else if (message instanceof ValueOrBuilder value) {
+            return valueToJsonValue(value);
+        } else if (message instanceof EmptyOrBuilder) {
+            return new Json.JsonObject(Map.of());
+        } else if (message instanceof AnyOrBuilder any) {
+            var clz = TYPE_CLASS_REGISTRY.get(any.getTypeUrl());
+            if (clz == null)
+                throw new Json.WriteException("Type not found in registry: " + any.getTypeUrl()
+                        + ". Make sure the message type is on the classpath.");
+            Message msg;
+            try {
+                msg = newBuilder(clz).mergeFrom(any.getValue()).build();
+            } catch (Exception e) {
+                throw new Json.WriteException("Failed to serialize Any type: " + any.getTypeUrl(), e);
             }
-
-            // Parse the value using the descriptor - this gives us a DynamicMessage
-            Message message = com.google.protobuf.DynamicMessage.parseFrom(descriptor, any.getValue());
-
-            // Manually serialize the DynamicMessage fields
-            Json.JsonValue value = serializeDynamicMessage(message);
-
-            // Add all fields from the nested message except those that would conflict with @type
-            if (value instanceof Json.JsonObject nestedObj) {
-                for (var entry : nestedObj.value().entrySet()) {
-                    if (!entry.getKey().equals("@type")) {
-                        map.put(entry.getKey(), entry.getValue());
-                    }
-                }
+            var fields = new LinkedHashMap<String, Json.JsonValue>();
+            fields.put("@type", new Json.JsonString(any.getTypeUrl()));
+            var jsonValue = messageToJsonValue(msg);
+            if (jsonValue instanceof Json.JsonObject obj) {
+                fields.putAll(obj.value());
             } else {
-                // For well-known types that serialize to primitives, use "value" field
-                map.put("value", value);
+                fields.put("value", jsonValue);
             }
-        } catch (Exception e) {
-            throw new Json.ConversionException("Failed to serialize Any type: " + any.getTypeUrl(), e);
+            return new Json.JsonObject(fields);
+        } else {
+            throw new Json.WriteException("Unsupported well-known protobuf type: "
+                    + message.getClass().getName());
         }
-
-        writer.write(new Json.JsonObject(map));
     }
 
-    /**
-     * Serialize a DynamicMessage to JsonValue by manually accessing its fields.
-     * This is needed because DynamicMessage doesn't have typed getters.
-     */
-    private static Json.JsonValue serializeDynamicMessage(Message message) {
-        // Check if it's a well-known type first
+    static Json.JsonValue messageToJsonValue(MessageOrBuilder message) {
+        if (isWellKnown(message.getDescriptorForType().getFullName())) {
+            return wellKnownToJsonValue(message);
+        }
+
         var descriptor = message.getDescriptorForType();
-        String fullName = descriptor.getFullName();
-
-        // Handle well-known types that serialize to primitives
-        if (fullName.equals("google.protobuf.Timestamp")) {
-            var seconds = (Long) message.getField(descriptor.findFieldByName("seconds"));
-            var nanos = (Integer) message.getField(descriptor.findFieldByName("nanos"));
-            return new Json.JsonString(Instant.ofEpochSecond(seconds, nanos).toString());
-        }
-        if (fullName.equals("google.protobuf.Duration")) {
-            var seconds = (Long) message.getField(descriptor.findFieldByName("seconds"));
-            var nanos = (Integer) message.getField(descriptor.findFieldByName("nanos"));
-            return new Json.JsonString(Duration.ofSeconds(seconds, nanos).toString());
-        }
-        if (fullName.equals("google.protobuf.StringValue")) {
-            return new Json.JsonString((String) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.Int32Value")) {
-            return new Json.JsonNumber((Integer) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.Int64Value")) {
-            return new Json.JsonNumber((Long) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.UInt32Value")) {
-            return new Json.JsonNumber((Integer) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.UInt64Value")) {
-            return new Json.JsonNumber((Long) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.BoolValue")) {
-            return new Json.JsonBoolean((Boolean) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.FloatValue")) {
-            return new Json.JsonNumber((Float) message.getField(descriptor.findFieldByName("value")));
-        }
-        if (fullName.equals("google.protobuf.DoubleValue")) {
-            return new Json.JsonNumber((Double) message.getField(descriptor.findFieldByName("value")));
-        }
-
         // For regular messages, serialize all fields to a JSON object
-        Map<String, Json.JsonValue> fieldMap = new LinkedHashMap<>();
+        Map<String, Json.JsonValue> fields =
+                new LinkedHashMap<>(Json.mapCap(descriptor.getFields().size()));
         for (var field : descriptor.getFields()) {
-            // Use the same logic as unsetOptionalField to skip fields
             if (unsetOptionalField(message, field)) {
                 continue;
             }
-            Object fieldValue = message.getField(field);
-            fieldMap.put(field.getJsonName(), convertFieldValue(fieldValue, field));
+            var v = invokeGetter(message, field);
+            fields.put(field.getJsonName(), convertFieldValue(v, field));
         }
-        return new Json.JsonObject(fieldMap);
+        return new Json.JsonObject(fields);
     }
 
-    /**
-     * Convert a protobuf field value to JsonValue.
-     */
-    private static Json.JsonValue convertFieldValue(Object value, Descriptors.FieldDescriptor field) {
-        if (field.isRepeated()) {
+    static Json.JsonValue convertFieldValue(Object value, Descriptors.FieldDescriptor field) {
+        if (field.isMapField()) {
+            Map<String, Json.JsonValue> map = new LinkedHashMap<>();
+            for (var entry : ((Map<?, ?>) value).entrySet()) {
+                Json.JsonValue key = convertSingleValue(
+                        entry.getKey(), field.getMessageType().findFieldByNumber(1));
+                Json.JsonValue val = convertSingleValue(
+                        entry.getValue(), field.getMessageType().findFieldByNumber(2));
+                map.put(Json.toString(key), val);
+            }
+            return new Json.JsonObject(map);
+        } else if (field.isRepeated()) {
             List<Json.JsonValue> list = new ArrayList<>();
             for (Object item : (List<?>) value) {
                 list.add(convertSingleValue(item, field));
@@ -444,10 +362,7 @@ public final class ProtobufCodec implements Json.Codec {
         }
     }
 
-    /**
-     * Convert a single protobuf value to JsonValue.
-     */
-    private static Json.JsonValue convertSingleValue(Object value, Descriptors.FieldDescriptor field) {
+    static Json.JsonValue convertSingleValue(Object value, Descriptors.FieldDescriptor field) {
         return switch (field.getType()) {
             case INT32, SINT32, SFIXED32, UINT32, FIXED32 -> new Json.JsonNumber((Integer) value);
             case INT64, SINT64, SFIXED64, UINT64, FIXED64 -> new Json.JsonNumber((Long) value);
@@ -456,9 +371,9 @@ public final class ProtobufCodec implements Json.Codec {
             case BOOL -> new Json.JsonBoolean((Boolean) value);
             case STRING -> new Json.JsonString((String) value);
             case BYTES -> new Json.JsonString(Base64.getEncoder().encodeToString(((ByteString) value).toByteArray()));
-            case ENUM -> new Json.JsonString(((Descriptors.EnumValueDescriptor) value).getName());
-            case MESSAGE -> serializeDynamicMessage((Message) value);
-            default -> throw new Json.ConversionException("Unsupported field type: " + field.getType());
+            case ENUM -> new Json.JsonString(((Enum<?>) value).name());
+            case MESSAGE -> messageToJsonValue((MessageOrBuilder) value);
+            case GROUP -> throw new Json.WriteException("Group type is not supported in protobuf JSON serialization");
         };
     }
 
@@ -519,7 +434,7 @@ public final class ProtobufCodec implements Json.Codec {
         }
     }
 
-    static java.lang.reflect.Type getterType(Message.Builder builder, Descriptors.FieldDescriptor field) {
+    static Type getterType(Message.Builder builder, Descriptors.FieldDescriptor field) {
         var getterMethodName = getterMethodName(field);
         try {
             var m = builder.getClass().getMethod(getterMethodName);
@@ -606,7 +521,7 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static boolean mergeWellKnown(Json.JsonValue json, Message.Builder builder) {
-        if (builder instanceof com.google.protobuf.Timestamp.Builder timestamp) {
+        if (builder instanceof Timestamp.Builder timestamp) {
             Instant instant = fromJsonValue(json, Instant.class);
             timestamp.setSeconds(instant.getEpochSecond());
             timestamp.setNanos(instant.getNano());
@@ -897,28 +812,22 @@ public final class ProtobufCodec implements Json.Codec {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private static void registerMessageClass(String className) {
         try {
             Class<?> clazz =
                     Class.forName(className, false, Thread.currentThread().getContextClassLoader());
-
-            // Only register concrete Message classes (not builders, not interfaces, not abstract)
             if (Message.class.isAssignableFrom(clazz)
                     && !clazz.isInterface()
                     && !Modifier.isAbstract(clazz.getModifiers())
                     && !clazz.getName().endsWith("$Builder")) {
-
-                // Get the descriptor via reflection
                 Method getDescriptor = clazz.getMethod("getDescriptor");
-                if (Modifier.isStatic(getDescriptor.getModifiers())) {
-                    Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
-                    String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
-                    TYPE_REGISTRY.put(typeUrl, descriptor);
-                    TYPE_CLASS_REGISTRY.put(typeUrl, (Class<? extends Message>) clazz);
-                }
+                Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
+                String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
+                TYPE_REGISTRY.put(typeUrl, descriptor);
+                TYPE_CLASS_REGISTRY.put(typeUrl, (Class<? extends Message>) clazz);
             }
-        } catch (Exception e) {
-            // Silently ignore classes that can't be loaded or don't have a descriptor
+        } catch (Exception ignored) {
         }
     }
 
