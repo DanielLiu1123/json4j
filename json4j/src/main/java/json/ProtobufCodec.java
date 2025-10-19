@@ -191,6 +191,32 @@ public final class ProtobufCodec implements Json.Codec {
         return false;
     }
 
+    /**
+     * Check if the given full name represents a well-known protobuf type.
+     *
+     * @param fullName the full name of the protobuf type (e.g., "google.protobuf.Timestamp")
+     * @return true if the type is a well-known protobuf type, false otherwise
+     */
+    static boolean isWellKnown(String fullName) {
+        return fullName.equals("google.protobuf.Timestamp")
+                || fullName.equals("google.protobuf.Duration")
+                || fullName.equals("google.protobuf.StringValue")
+                || fullName.equals("google.protobuf.Int32Value")
+                || fullName.equals("google.protobuf.Int64Value")
+                || fullName.equals("google.protobuf.UInt32Value")
+                || fullName.equals("google.protobuf.UInt64Value")
+                || fullName.equals("google.protobuf.BoolValue")
+                || fullName.equals("google.protobuf.FloatValue")
+                || fullName.equals("google.protobuf.DoubleValue")
+                || fullName.equals("google.protobuf.BytesValue")
+                || fullName.equals("google.protobuf.FieldMask")
+                || fullName.equals("google.protobuf.Struct")
+                || fullName.equals("google.protobuf.ListValue")
+                || fullName.equals("google.protobuf.Value")
+                || fullName.equals("google.protobuf.Any")
+                || fullName.equals("google.protobuf.Empty");
+    }
+
     static void writeEnum(Json.Writer writer, Object e) {
         if (!(e instanceof ProtocolMessageEnum) && !(e instanceof Descriptors.EnumValueDescriptor)) {
             throw new Json.WriteException("Not a protobuf Enum: " + e.getClass().getName());
