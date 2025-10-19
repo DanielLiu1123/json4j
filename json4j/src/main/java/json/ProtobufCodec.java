@@ -73,12 +73,31 @@ import java.util.jar.JarFile;
 public final class ProtobufCodec implements Json.Codec {
 
     private static final boolean PROTOBUF_PRESENT = isClassPresent("com.google.protobuf.Message");
-    private static final Map<String, Class<?>> TYPE_CLASS_REGISTRY = new ConcurrentHashMap<>();
+    /**
+     * Lazy-initialized registry holder using the Initialization-on-demand holder idiom.
+     * This ensures thread-safe lazy loading - the registry is only initialized when first accessed.
+     */
+    private static class TypeRegistryHolder {
+        private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
 
-    static {
-        if (PROTOBUF_PRESENT) {
-            initTypeRegistry();
+        private static Map<String, Class<?>> initializeRegistry() {
+            Map<String, Class<?>> registry = new ConcurrentHashMap<>();
+            if (!PROTOBUF_PRESENT) {
+                return registry;
+            }
+            String cp = System.getProperty("java.class.path");
+            for (String e : cp.split(File.pathSeparator)) {
+                scanClasspath(e, registry);
+            }
+            return registry;
         }
+    }
+
+    /**
+     * Gets the type registry, initializing it on first access.
+     */
+    private static Map<String, Class<?>> getTypeRegistry() {
+        return TypeRegistryHolder.INSTANCE;
     }
 
     public ProtobufCodec() {}
@@ -291,7 +310,7 @@ public final class ProtobufCodec implements Json.Codec {
         } else if (message instanceof EmptyOrBuilder) {
             return new Json.JsonObject(Map.of());
         } else if (message instanceof AnyOrBuilder any) {
-            var clz = TYPE_CLASS_REGISTRY.get(any.getTypeUrl());
+            var clz = getTypeRegistry().get(any.getTypeUrl());
             if (clz == null)
                 throw new Json.WriteException("Type not found in registry: " + any.getTypeUrl()
                         + ". Make sure the message type is on the classpath.");
@@ -585,40 +604,32 @@ public final class ProtobufCodec implements Json.Codec {
             value.mergeFrom(toValue(json));
             return true;
         }
-        if (builder instanceof Any.Builder any) {
-            parseAny(json, any);
+        if (builder instanceof Empty.Builder) {
             return true;
         }
-        if (builder instanceof Empty.Builder) {
+        if (builder instanceof Any.Builder any) {
+            parseAny(expectObject(json), any);
             return true;
         }
         return false;
     }
 
-    static void parseAny(Json.JsonValue json, Any.Builder anyBuilder) {
-        Json.JsonObject obj = expectObject(json);
-
-        // Extract @type field
-        Json.JsonValue typeValue = obj.value().get("@type");
-        if (typeValue == null) {
-            throw new Json.ConversionException("Any type must have @type field");
-        }
-        if (!(typeValue instanceof Json.JsonString typeStr)) {
+    static void parseAny(Json.JsonObject jo, Any.Builder anyBuilder) {
+        Json.JsonValue typeValue = jo.value().get("@type");
+        if (typeValue == null) throw new Json.ConversionException("Any type must have @type field");
+        if (!(typeValue instanceof Json.JsonString typeStr))
             throw new Json.ConversionException("@type field must be a string");
-        }
 
         String typeUrl = typeStr.value();
-        Class<?> messageClass = TYPE_CLASS_REGISTRY.get(typeUrl);
-
-        if (messageClass == null) {
+        Class<?> messageClass = getTypeRegistry().get(typeUrl);
+        if (messageClass == null)
             throw new Json.ConversionException(
                     "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
-        }
 
         try {
             // Create a JSON object with all fields except @type
             Map<String, Json.JsonValue> fields = new LinkedHashMap<>();
-            for (var entry : obj.value().entrySet()) {
+            for (var entry : jo.value().entrySet()) {
                 if (!entry.getKey().equals("@type")) {
                     fields.put(entry.getKey(), entry.getValue());
                 }
@@ -633,9 +644,9 @@ public final class ProtobufCodec implements Json.Codec {
             }
 
             // Parse the nested message using the actual Message class
-            Message.Builder nestedBuilder = newBuilder(messageClass);
-            mergeIntoBuilder(valueToDeserialize, nestedBuilder);
-            Message nestedMessage = nestedBuilder.build();
+            Message.Builder builder = newBuilder(messageClass);
+            mergeIntoBuilder(valueToDeserialize, builder);
+            Message nestedMessage = builder.build();
 
             // Pack into Any
             anyBuilder.setTypeUrl(typeUrl);
@@ -725,24 +736,17 @@ public final class ProtobufCodec implements Json.Codec {
                 + value.getClass().getSimpleName());
     }
 
-    static void initTypeRegistry() {
-        String cp = System.getProperty("java.class.path");
-        for (String e : cp.split(File.pathSeparator)) {
-            scanClasspath(e);
-        }
-    }
-
-    static void scanClasspath(String cp) {
+    static void scanClasspath(String cp, Map<String, Class<?>> registry) {
         var file = new File(cp);
         if (!file.exists()) return;
         if (file.getName().endsWith(".jar")) {
-            scanJar(file);
+            scanJar(file, registry);
         } else if (file.isDirectory()) {
-            scanDir(file);
+            scanDir(file, registry);
         }
     }
 
-    static void scanJar(File jar) {
+    static void scanJar(File jar, Map<String, Class<?>> registry) {
         try (var jarFile = new JarFile(jar)) {
             var entries = jarFile.entries();
             while (entries.hasMoreElements()) {
@@ -750,20 +754,20 @@ public final class ProtobufCodec implements Json.Codec {
                 var name = entry.getName();
                 if (name.endsWith(".class")) {
                     String className = name.replace('/', '.').substring(0, name.length() - 6);
-                    registerMessageClass(className);
+                    registerMessageClass(className, registry);
                 }
             }
         } catch (IOException ignored) {
         }
     }
 
-    static void scanDir(File dir) {
+    static void scanDir(File dir, Map<String, Class<?>> registry) {
         if (!dir.exists() || !dir.isDirectory()) return;
         var files = dir.listFiles();
         if (files == null) return;
         for (File file : files) {
-            if (file.isDirectory()) scanDir(file);
-            else if (file.getName().endsWith(".class")) registerMessageClass(className(file));
+            if (file.isDirectory()) scanDir(file, registry);
+            else if (file.getName().endsWith(".class")) registerMessageClass(className(file), registry);
         }
     }
 
@@ -783,7 +787,7 @@ public final class ProtobufCodec implements Json.Codec {
         return s.replace(File.separatorChar, '.').substring(0, s.length() - 6);
     }
 
-    static void registerMessageClass(String className) {
+    static void registerMessageClass(String className, Map<String, Class<?>> registry) {
         try {
             if (className.contains("META-INF") || className.contains("module-info")) return;
             Class<?> clazz =
@@ -795,7 +799,7 @@ public final class ProtobufCodec implements Json.Codec {
                 Method getDescriptor = clazz.getMethod("getDescriptor");
                 Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
                 String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
-                TYPE_CLASS_REGISTRY.put(typeUrl, clazz);
+                registry.put(typeUrl, clazz);
             }
         } catch (Throwable ignored) {
         }
