@@ -97,7 +97,7 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static Map<String, Class<?>> getTypeRegistry() {
-        return TypeRegistryHolder.INSTANCE;
+        return TypeRegistryHolder.getInstance();
     }
 
     static boolean isProtobuf(Object o) {
@@ -737,7 +737,18 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     private static class TypeRegistryHolder {
-        private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
+        private static volatile Map<String, Class<?>> INSTANCE = null;
+
+        private static Map<String, Class<?>> getInstance() {
+            if (INSTANCE == null) {
+                synchronized (TypeRegistryHolder.class) {
+                    if (INSTANCE == null) {
+                        INSTANCE = initializeRegistry();
+                    }
+                }
+            }
+            return INSTANCE;
+        }
 
         private static Map<String, Class<?>> initializeRegistry() {
             String cp = System.getProperty("java.class.path");
