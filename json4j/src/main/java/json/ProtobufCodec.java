@@ -188,23 +188,7 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static boolean isWellKnown(String fullName) {
-        return fullName.equals(Timestamp.getDescriptor().getFullName())
-                || fullName.equals(com.google.protobuf.Duration.getDescriptor().getFullName())
-                || fullName.equals(StringValue.getDescriptor().getFullName())
-                || fullName.equals(Int32Value.getDescriptor().getFullName())
-                || fullName.equals(Int64Value.getDescriptor().getFullName())
-                || fullName.equals(UInt32Value.getDescriptor().getFullName())
-                || fullName.equals(UInt64Value.getDescriptor().getFullName())
-                || fullName.equals(BoolValue.getDescriptor().getFullName())
-                || fullName.equals(FloatValue.getDescriptor().getFullName())
-                || fullName.equals(DoubleValue.getDescriptor().getFullName())
-                || fullName.equals(BytesValue.getDescriptor().getFullName())
-                || fullName.equals(FieldMask.getDescriptor().getFullName())
-                || fullName.equals(Struct.getDescriptor().getFullName())
-                || fullName.equals(ListValue.getDescriptor().getFullName())
-                || fullName.equals(Value.getDescriptor().getFullName())
-                || fullName.equals(Empty.getDescriptor().getFullName())
-                || fullName.equals(Any.getDescriptor().getFullName());
+        return getWellKnownClass(fullName) != null;
     }
 
     static Class<?> getWellKnownClass(String fullName) {
@@ -226,7 +210,7 @@ public final class ProtobufCodec implements Json.Codec {
         if (fullName.equals(Value.getDescriptor().getFullName())) return Value.class;
         if (fullName.equals(Empty.getDescriptor().getFullName())) return Empty.class;
         if (fullName.equals(Any.getDescriptor().getFullName())) return Any.class;
-        throw new IllegalArgumentException("Not a wellknown type: " + fullName);
+        return null;
     }
 
     static void writeEnum(Json.Writer writer, Object e) {
@@ -313,13 +297,8 @@ public final class ProtobufCodec implements Json.Codec {
             String typeUrl = any.getTypeUrl();
             // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
             String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
-
-            // Only use registry for non-wellknown types
-            Class<?> clz;
-            if (isWellKnown(fullName)) {
-                // For wellknown types, we can get the class directly without registry
-                clz = getWellKnownClass(fullName);
-            } else {
+            Class<?> clz = getWellKnownClass(fullName);
+            if (clz == null) {
                 clz = getTypeRegistry().get(typeUrl);
                 if (clz == null)
                     throw new Json.WriteException("Type not found in registry: " + typeUrl
@@ -635,13 +614,8 @@ public final class ProtobufCodec implements Json.Codec {
         String typeUrl = typeStr.value();
         // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
         String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
-
-        // Only use registry for non-wellknown types
-        Class<?> messageClass;
-        if (isWellKnown(fullName)) {
-            // For wellknown types, we can get the class directly without registry
-            messageClass = getWellKnownClass(fullName);
-        } else {
+        Class<?> messageClass = getWellKnownClass(fullName);
+        if (messageClass == null) {
             messageClass = getTypeRegistry().get(typeUrl);
             if (messageClass == null)
                 throw new Json.ConversionException(
