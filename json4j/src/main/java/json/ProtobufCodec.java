@@ -207,6 +207,28 @@ public final class ProtobufCodec implements Json.Codec {
                 || fullName.equals(Any.getDescriptor().getFullName());
     }
 
+    static Class<?> getWellKnownClass(String fullName) {
+        if (fullName.equals(Timestamp.getDescriptor().getFullName())) return Timestamp.class;
+        if (fullName.equals(com.google.protobuf.Duration.getDescriptor().getFullName()))
+            return com.google.protobuf.Duration.class;
+        if (fullName.equals(StringValue.getDescriptor().getFullName())) return StringValue.class;
+        if (fullName.equals(Int32Value.getDescriptor().getFullName())) return Int32Value.class;
+        if (fullName.equals(Int64Value.getDescriptor().getFullName())) return Int64Value.class;
+        if (fullName.equals(UInt32Value.getDescriptor().getFullName())) return UInt32Value.class;
+        if (fullName.equals(UInt64Value.getDescriptor().getFullName())) return UInt64Value.class;
+        if (fullName.equals(BoolValue.getDescriptor().getFullName())) return BoolValue.class;
+        if (fullName.equals(FloatValue.getDescriptor().getFullName())) return FloatValue.class;
+        if (fullName.equals(DoubleValue.getDescriptor().getFullName())) return DoubleValue.class;
+        if (fullName.equals(BytesValue.getDescriptor().getFullName())) return BytesValue.class;
+        if (fullName.equals(FieldMask.getDescriptor().getFullName())) return FieldMask.class;
+        if (fullName.equals(Struct.getDescriptor().getFullName())) return Struct.class;
+        if (fullName.equals(ListValue.getDescriptor().getFullName())) return ListValue.class;
+        if (fullName.equals(Value.getDescriptor().getFullName())) return Value.class;
+        if (fullName.equals(Empty.getDescriptor().getFullName())) return Empty.class;
+        if (fullName.equals(Any.getDescriptor().getFullName())) return Any.class;
+        throw new IllegalArgumentException("Not a wellknown type: " + fullName);
+    }
+
     static void writeEnum(Json.Writer writer, Object e) {
         if (!(e instanceof ProtocolMessageEnum) && !(e instanceof Descriptors.EnumValueDescriptor)) {
             throw new Json.WriteException("Not a protobuf Enum: " + e.getClass().getName());
@@ -288,18 +310,30 @@ public final class ProtobufCodec implements Json.Codec {
         } else if (message instanceof EmptyOrBuilder) {
             return new Json.JsonObject(Map.of());
         } else if (message instanceof AnyOrBuilder any) {
-            var clz = getTypeRegistry().get(any.getTypeUrl());
-            if (clz == null)
-                throw new Json.WriteException("Type not found in registry: " + any.getTypeUrl()
-                        + ". Make sure the message type is on the classpath.");
+            String typeUrl = any.getTypeUrl();
+            // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
+            String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
+
+            // Only use registry for non-wellknown types
+            Class<?> clz;
+            if (isWellKnown(fullName)) {
+                // For wellknown types, we can get the class directly without registry
+                clz = getWellKnownClass(fullName);
+            } else {
+                clz = getTypeRegistry().get(typeUrl);
+                if (clz == null)
+                    throw new Json.WriteException("Type not found in registry: " + typeUrl
+                            + ". Make sure the message type is on the classpath.");
+            }
+
             Message msg;
             try {
                 msg = newBuilder(clz).mergeFrom(any.getValue()).build();
             } catch (Exception e) {
-                throw new Json.WriteException("Failed to serialize Any type: " + any.getTypeUrl(), e);
+                throw new Json.WriteException("Failed to serialize Any type: " + typeUrl, e);
             }
             var fields = new LinkedHashMap<String, Json.JsonValue>();
-            fields.put("@type", new Json.JsonString(any.getTypeUrl()));
+            fields.put("@type", new Json.JsonString(typeUrl));
             var jsonValue = messageToJsonValue(msg);
             if (jsonValue instanceof Json.JsonObject obj) {
                 fields.putAll(obj.value());
@@ -599,10 +633,20 @@ public final class ProtobufCodec implements Json.Codec {
             throw new Json.ConversionException("@type field must be a string");
 
         String typeUrl = typeStr.value();
-        Class<?> messageClass = getTypeRegistry().get(typeUrl);
-        if (messageClass == null)
-            throw new Json.ConversionException(
-                    "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
+        // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
+        String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
+
+        // Only use registry for non-wellknown types
+        Class<?> messageClass;
+        if (isWellKnown(fullName)) {
+            // For wellknown types, we can get the class directly without registry
+            messageClass = getWellKnownClass(fullName);
+        } else {
+            messageClass = getTypeRegistry().get(typeUrl);
+            if (messageClass == null)
+                throw new Json.ConversionException(
+                        "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
+        }
 
         try {
             // Create a JSON object with all fields except @type
@@ -612,9 +656,6 @@ public final class ProtobufCodec implements Json.Codec {
                     fields.put(entry.getKey(), entry.getValue());
                 }
             }
-
-            // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
-            String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
 
             // If it's a well-known type with only a "value" field, use it directly
             Json.JsonValue valueToDeserialize;
