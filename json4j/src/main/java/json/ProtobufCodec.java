@@ -188,23 +188,29 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static boolean isWellKnown(String fullName) {
-        return fullName.equals(Timestamp.getDescriptor().getFullName())
-                || fullName.equals(com.google.protobuf.Duration.getDescriptor().getFullName())
-                || fullName.equals(StringValue.getDescriptor().getFullName())
-                || fullName.equals(Int32Value.getDescriptor().getFullName())
-                || fullName.equals(Int64Value.getDescriptor().getFullName())
-                || fullName.equals(UInt32Value.getDescriptor().getFullName())
-                || fullName.equals(UInt64Value.getDescriptor().getFullName())
-                || fullName.equals(BoolValue.getDescriptor().getFullName())
-                || fullName.equals(FloatValue.getDescriptor().getFullName())
-                || fullName.equals(DoubleValue.getDescriptor().getFullName())
-                || fullName.equals(BytesValue.getDescriptor().getFullName())
-                || fullName.equals(FieldMask.getDescriptor().getFullName())
-                || fullName.equals(Struct.getDescriptor().getFullName())
-                || fullName.equals(ListValue.getDescriptor().getFullName())
-                || fullName.equals(Value.getDescriptor().getFullName())
-                || fullName.equals(Empty.getDescriptor().getFullName())
-                || fullName.equals(Any.getDescriptor().getFullName());
+        return getWellKnownClass(fullName) != null;
+    }
+
+    static Class<?> getWellKnownClass(String fullName) {
+        if (fullName.equals(Timestamp.getDescriptor().getFullName())) return Timestamp.class;
+        if (fullName.equals(com.google.protobuf.Duration.getDescriptor().getFullName()))
+            return com.google.protobuf.Duration.class;
+        if (fullName.equals(StringValue.getDescriptor().getFullName())) return StringValue.class;
+        if (fullName.equals(Int32Value.getDescriptor().getFullName())) return Int32Value.class;
+        if (fullName.equals(Int64Value.getDescriptor().getFullName())) return Int64Value.class;
+        if (fullName.equals(UInt32Value.getDescriptor().getFullName())) return UInt32Value.class;
+        if (fullName.equals(UInt64Value.getDescriptor().getFullName())) return UInt64Value.class;
+        if (fullName.equals(BoolValue.getDescriptor().getFullName())) return BoolValue.class;
+        if (fullName.equals(FloatValue.getDescriptor().getFullName())) return FloatValue.class;
+        if (fullName.equals(DoubleValue.getDescriptor().getFullName())) return DoubleValue.class;
+        if (fullName.equals(BytesValue.getDescriptor().getFullName())) return BytesValue.class;
+        if (fullName.equals(FieldMask.getDescriptor().getFullName())) return FieldMask.class;
+        if (fullName.equals(Struct.getDescriptor().getFullName())) return Struct.class;
+        if (fullName.equals(ListValue.getDescriptor().getFullName())) return ListValue.class;
+        if (fullName.equals(Value.getDescriptor().getFullName())) return Value.class;
+        if (fullName.equals(Empty.getDescriptor().getFullName())) return Empty.class;
+        if (fullName.equals(Any.getDescriptor().getFullName())) return Any.class;
+        return null;
     }
 
     static void writeEnum(Json.Writer writer, Object e) {
@@ -288,18 +294,19 @@ public final class ProtobufCodec implements Json.Codec {
         } else if (message instanceof EmptyOrBuilder) {
             return new Json.JsonObject(Map.of());
         } else if (message instanceof AnyOrBuilder any) {
-            var clz = getTypeRegistry().get(any.getTypeUrl());
-            if (clz == null)
-                throw new Json.WriteException("Type not found in registry: " + any.getTypeUrl()
-                        + ". Make sure the message type is on the classpath.");
+            String typeUrl = any.getTypeUrl();
+            // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
+            String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
+            var clz = mustGetMessageClass(fullName);
+
             Message msg;
             try {
                 msg = newBuilder(clz).mergeFrom(any.getValue()).build();
             } catch (Exception e) {
-                throw new Json.WriteException("Failed to serialize Any type: " + any.getTypeUrl(), e);
+                throw new Json.WriteException("Failed to serialize Any type: " + typeUrl, e);
             }
             var fields = new LinkedHashMap<String, Json.JsonValue>();
-            fields.put("@type", new Json.JsonString(any.getTypeUrl()));
+            fields.put("@type", new Json.JsonString(typeUrl));
             var jsonValue = messageToJsonValue(msg);
             if (jsonValue instanceof Json.JsonObject obj) {
                 fields.putAll(obj.value());
@@ -311,6 +318,17 @@ public final class ProtobufCodec implements Json.Codec {
             throw new Json.WriteException("Unsupported well-known protobuf type: "
                     + message.getClass().getName());
         }
+    }
+
+    static Class<?> mustGetMessageClass(String fullName) {
+        Class<?> clz = getWellKnownClass(fullName);
+        if (clz == null) {
+            clz = getTypeRegistry().get(fullName);
+            if (clz == null)
+                throw new Json.WriteException("Type not found in registry: " + fullName
+                        + ". Make sure the message type is on the classpath.");
+        }
+        return clz;
     }
 
     static Json.JsonValue messageToJsonValue(MessageOrBuilder message) {
@@ -599,10 +617,9 @@ public final class ProtobufCodec implements Json.Codec {
             throw new Json.ConversionException("@type field must be a string");
 
         String typeUrl = typeStr.value();
-        Class<?> messageClass = getTypeRegistry().get(typeUrl);
-        if (messageClass == null)
-            throw new Json.ConversionException(
-                    "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
+        // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
+        String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
+        Class<?> messageClass = mustGetMessageClass(fullName);
 
         try {
             // Create a JSON object with all fields except @type
@@ -612,9 +629,6 @@ public final class ProtobufCodec implements Json.Codec {
                     fields.put(entry.getKey(), entry.getValue());
                 }
             }
-
-            // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
-            String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
 
             // If it's a well-known type with only a "value" field, use it directly
             Json.JsonValue valueToDeserialize;
@@ -737,6 +751,9 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     private static class TypeRegistryHolder {
+        /**
+         * fullName -> Class
+         */
         private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
 
         private static Map<String, Class<?>> initializeRegistry() {
@@ -811,8 +828,7 @@ public final class ProtobufCodec implements Json.Codec {
                         && !clazz.getName().endsWith("$Builder")) {
                     Method getDescriptor = clazz.getMethod("getDescriptor");
                     Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
-                    String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
-                    registry.put(typeUrl, clazz);
+                    registry.put(descriptor.getFullName(), clazz);
                 }
             } catch (Throwable ignored) {
             }
