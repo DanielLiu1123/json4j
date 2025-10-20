@@ -97,7 +97,7 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static Map<String, Class<?>> getTypeRegistry() {
-        return TypeRegistryHolder.getInstance();
+        return TypeRegistryHolder.INSTANCE;
     }
 
     static boolean isProtobuf(Object o) {
@@ -297,13 +297,7 @@ public final class ProtobufCodec implements Json.Codec {
             String typeUrl = any.getTypeUrl();
             // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
             String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
-            Class<?> clz = getWellKnownClass(fullName);
-            if (clz == null) {
-                clz = getTypeRegistry().get(typeUrl);
-                if (clz == null)
-                    throw new Json.WriteException("Type not found in registry: " + typeUrl
-                            + ". Make sure the message type is on the classpath.");
-            }
+            var clz = mustGetMessageClass(fullName);
 
             Message msg;
             try {
@@ -324,6 +318,17 @@ public final class ProtobufCodec implements Json.Codec {
             throw new Json.WriteException("Unsupported well-known protobuf type: "
                     + message.getClass().getName());
         }
+    }
+
+    static Class<?> mustGetMessageClass(String fullName) {
+        Class<?> clz = getWellKnownClass(fullName);
+        if (clz == null) {
+            clz = getTypeRegistry().get(fullName);
+            if (clz == null)
+                throw new Json.WriteException("Type not found in registry: " + fullName
+                        + ". Make sure the message type is on the classpath.");
+        }
+        return clz;
     }
 
     static Json.JsonValue messageToJsonValue(MessageOrBuilder message) {
@@ -614,13 +619,7 @@ public final class ProtobufCodec implements Json.Codec {
         String typeUrl = typeStr.value();
         // Extract the full name from typeUrl (format: "type.googleapis.com/full.name")
         String fullName = typeUrl.substring(typeUrl.lastIndexOf('/') + 1);
-        Class<?> messageClass = getWellKnownClass(fullName);
-        if (messageClass == null) {
-            messageClass = getTypeRegistry().get(typeUrl);
-            if (messageClass == null)
-                throw new Json.ConversionException(
-                        "Type not found in registry: " + typeUrl + ". Make sure the message type is on the classpath.");
-        }
+        Class<?> messageClass = mustGetMessageClass(fullName);
 
         try {
             // Create a JSON object with all fields except @type
@@ -752,18 +751,10 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     private static class TypeRegistryHolder {
-        private static volatile Map<String, Class<?>> INSTANCE = null;
-
-        private static Map<String, Class<?>> getInstance() {
-            if (INSTANCE == null) {
-                synchronized (TypeRegistryHolder.class) {
-                    if (INSTANCE == null) {
-                        INSTANCE = initializeRegistry();
-                    }
-                }
-            }
-            return INSTANCE;
-        }
+        /**
+         * fullName -> Class
+         */
+        private static final Map<String, Class<?>> INSTANCE = initializeRegistry();
 
         private static Map<String, Class<?>> initializeRegistry() {
             String cp = System.getProperty("java.class.path");
@@ -837,8 +828,7 @@ public final class ProtobufCodec implements Json.Codec {
                         && !clazz.getName().endsWith("$Builder")) {
                     Method getDescriptor = clazz.getMethod("getDescriptor");
                     Descriptors.Descriptor descriptor = (Descriptors.Descriptor) getDescriptor.invoke(null);
-                    String typeUrl = "type.googleapis.com/" + descriptor.getFullName();
-                    registry.put(typeUrl, clazz);
+                    registry.put(descriptor.getFullName(), clazz);
                 }
             } catch (Throwable ignored) {
             }
