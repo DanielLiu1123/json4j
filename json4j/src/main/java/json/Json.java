@@ -129,7 +129,7 @@ public final class Json {
     public static <T> T parse(String json, Type<T> type) {
         Objects.requireNonNull(json, "json");
         Objects.requireNonNull(type, "type");
-        var jv = new Parser(new Lexer(json)).parse();
+        var jv = new SyntaxAnalyzer(new Lexer(json)).parse();
         return fromJsonValue(jv, canonicalize(type.getType()));
     }
 
@@ -464,10 +464,10 @@ public final class Json {
         }
     }
 
-    static final class Parser {
+    static final class SyntaxAnalyzer {
         final Lexer lexer;
 
-        Parser(Lexer l) {
+        SyntaxAnalyzer(Lexer l) {
             this.lexer = l;
         }
 
