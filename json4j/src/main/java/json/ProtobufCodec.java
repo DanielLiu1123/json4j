@@ -53,6 +53,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
@@ -773,10 +774,17 @@ public final class ProtobufCodec implements Json.Codec {
         static void scanClasspath(String cp, Map<String, Class<?>> registry) {
             var file = new File(cp);
             if (!file.exists()) return;
-            if (file.getName().endsWith(".jar")) {
+            if (file.isFile() && file.getName().endsWith(".jar")) {
                 scanJar(file, registry);
             } else if (file.isDirectory()) {
                 scanDir(file, registry);
+            } else if (file.isFile() && file.getName().endsWith(".class")) {
+                try (var is = new FileInputStream(file)) {
+                    Clazz clazz = ClassReader.read(is);
+                    registerMessageClass(clazz, registry);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             }
         }
 
