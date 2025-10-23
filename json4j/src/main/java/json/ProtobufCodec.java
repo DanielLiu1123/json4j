@@ -1,7 +1,7 @@
 package json;
 
-import static json.Json.fromJsonValue;
 import static json.Json.isClassPresent;
+import static json.Json.mapCap;
 import static json.Json.raw;
 import static json.Json.toCamelCase;
 import static json.Json.toSnakeCase;
@@ -87,18 +87,18 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     @Override
-    public void serialize(Json.Writer writer, Object o) {
-        writeProtobuf(writer, o);
+    public String serialize(Json.Writer writer, Object o) {
+        return writeProtobuf(writer, o);
     }
 
     @Override
-    public boolean canDeserialize(Json.JsonValue jv, Type targetType) {
+    public boolean canDeserialize(Json.JsonValue jsonValue, Type targetType) {
         return PROTOBUF_PRESENT && isProtobufClass(raw(targetType));
     }
 
     @Override
-    public Object deserialize(Json.JsonValue jv, Type targetType) {
-        return parseProtobuf(jv, raw(targetType));
+    public Object deserialize(Json.Parser parser, Json.JsonValue jsonValue, Type targetType) {
+        return parseProtobuf(parser, jsonValue, raw(targetType));
     }
 
     static Map<String, Class<?>> getTypeRegistry() {
@@ -146,10 +146,10 @@ public final class ProtobufCodec implements Json.Codec {
                 || typeBetween(raw, null, Descriptors.EnumValueDescriptor.class);
     }
 
-    static void writeProtobuf(Json.Writer writer, Object o) {
-        if (isMessageOrBuilder(o)) writeMessageOrBuilder(writer, (MessageOrBuilder) o);
-        else if (isEnum(o)) writeEnum(writer, o);
-        else if (isSpecialType(o)) writeSpecialType(writer, o);
+    static String writeProtobuf(Json.Writer writer, Object o) {
+        if (isMessageOrBuilder(o)) return writeMessageOrBuilder(writer, (MessageOrBuilder) o);
+        else if (isEnum(o)) return writeEnum(writer, o);
+        else if (isSpecialType(o)) return writeSpecialType(writer, o);
         else
             throw new Json.WriteException(
                     "Not a protobuf Message, Builder, Enum, or special type: "
@@ -157,23 +157,12 @@ public final class ProtobufCodec implements Json.Codec {
                     null);
     }
 
-    static void writeMessageOrBuilder(Json.Writer writer, MessageOrBuilder message) {
+    static String writeMessageOrBuilder(Json.Writer writer, MessageOrBuilder message) {
         if (isWellKnown(message.getDescriptorForType().getFullName())) {
-            writer.write(wellKnownToJsonValue(message));
-            return;
+            return writer.write(wellKnownToJsonValue(message));
         }
-        writer.out.append('{');
-        boolean first = true;
-        for (var field : message.getDescriptorForType().getFields()) {
-            if (unsetOptionalField(message, field)) continue;
-            Object v = invokeGetter(message, field);
-            if (!first) writer.out.append(',');
-            first = false;
-            writer.writeString(field.getJsonName());
-            writer.out.append(':');
-            writer.write(v);
-        }
-        writer.out.append('}');
+        var jo = messageToJsonValue(message);
+        return writer.write(jo);
     }
 
     static boolean unsetOptionalField(MessageOrBuilder message, Descriptors.FieldDescriptor field) {
@@ -218,7 +207,7 @@ public final class ProtobufCodec implements Json.Codec {
         return null;
     }
 
-    static void writeEnum(Json.Writer writer, Object e) {
+    static String writeEnum(Json.Writer writer, Object e) {
         if (!(e instanceof ProtocolMessageEnum) && !(e instanceof Descriptors.EnumValueDescriptor)) {
             throw new Json.WriteException("Not a protobuf Enum: " + e.getClass().getName());
         }
@@ -227,38 +216,38 @@ public final class ProtobufCodec implements Json.Codec {
                 e instanceof ProtocolMessageEnum pme ? pme.getValueDescriptor() : (Descriptors.EnumValueDescriptor) e;
 
         if (evd.getFullName().equals(NullValue.getDescriptor().getFullName())) {
-            writer.write(null);
+            return writer.write(null);
         } else {
-            writer.write(evd.getName());
+            return writer.write(evd.getName());
         }
     }
 
-    static void writeSpecialType(Json.Writer writer, Object o) {
+    static String writeSpecialType(Json.Writer writer, Object o) {
         if (o instanceof ProtocolStringList list) {
-            writer.write(List.copyOf(list));
+            return writer.write(List.copyOf(list));
         } else {
             throw new Json.WriteException(
                     "Unsupported special protobuf type: " + o.getClass().getName());
         }
     }
 
-    static Object parseProtobuf(Json.JsonValue json, Class<?> raw) {
-        if (isMessageClass(raw)) return parseMessage(json, raw);
-        if (isMessageBuilderClass(raw)) return parseMessageBuilder(json, raw);
+    static Object parseProtobuf(Json.Parser parser, Json.JsonValue json, Class<?> raw) {
+        if (isMessageClass(raw)) return parseMessage(parser, json, raw);
+        if (isMessageBuilderClass(raw)) return parseMessageBuilder(parser, json, raw);
         if (isEnumClass(raw)) return parseEnum(json, raw);
-        if (isSpecialTypeClass(raw)) return parseSpecialType(json, raw);
+        if (isSpecialTypeClass(raw)) return parseSpecialType(parser, json, raw);
         throw new Json.ConversionException("Not a protobuf Message, Builder, or Enum class: " + raw.getName());
     }
 
-    static Object parseMessage(Json.JsonValue json, Class<?> raw) {
+    static Object parseMessage(Json.Parser parser, Json.JsonValue json, Class<?> raw) {
         var builder = newBuilder(raw);
-        mergeIntoBuilder(json, builder);
+        mergeIntoBuilder(parser, json, builder);
         return builder.build();
     }
 
-    static Object parseMessageBuilder(Json.JsonValue json, Class<?> raw) {
+    static Object parseMessageBuilder(Json.Parser parser, Json.JsonValue json, Class<?> raw) {
         var builder = newBuilder(raw);
-        mergeIntoBuilder(json, builder);
+        mergeIntoBuilder(parser, json, builder);
         return builder;
     }
 
@@ -344,21 +333,22 @@ public final class ProtobufCodec implements Json.Codec {
         var descriptor = message.getDescriptorForType();
         // For regular messages, serialize all fields to a JSON object
         Map<String, Json.JsonValue> fields =
-                new LinkedHashMap<>(Json.mapCap(descriptor.getFields().size()));
+                new LinkedHashMap<>(mapCap(descriptor.getFields().size()));
         for (var field : descriptor.getFields()) {
             if (unsetOptionalField(message, field)) {
                 continue;
             }
             var v = invokeGetter(message, field);
-            fields.put(field.getJsonName(), convertFieldValue(v, field));
+            fields.put(field.getJsonName(), fieldToJsonValue(v, field));
         }
         return new Json.JsonObject(fields);
     }
 
-    static Json.JsonValue convertFieldValue(Object value, Descriptors.FieldDescriptor field) {
+    static Json.JsonValue fieldToJsonValue(Object value, Descriptors.FieldDescriptor field) {
         if (field.isMapField()) {
-            Map<String, Json.JsonValue> map = new LinkedHashMap<>();
-            for (var entry : ((Map<?, ?>) value).entrySet()) {
+            var m = (Map<?, ?>) value;
+            Map<String, Json.JsonValue> map = new LinkedHashMap<>(mapCap(m.size()));
+            for (var entry : m.entrySet()) {
                 Json.JsonValue key = convertSingleValue(
                         entry.getKey(), field.getMessageType().findFieldByNumber(1));
                 Json.JsonValue val = convertSingleValue(
@@ -367,8 +357,9 @@ public final class ProtobufCodec implements Json.Codec {
             }
             return new Json.JsonObject(map);
         } else if (field.isRepeated()) {
-            List<Json.JsonValue> list = new ArrayList<>();
-            for (Object item : (List<?>) value) {
+            List<?> l = (List<?>) value;
+            List<Json.JsonValue> list = new ArrayList<>(l.size());
+            for (Object item : l) {
                 list.add(convertSingleValue(item, field));
             }
             return new Json.JsonArray(list);
@@ -378,17 +369,17 @@ public final class ProtobufCodec implements Json.Codec {
     }
 
     static Json.JsonValue convertSingleValue(Object value, Descriptors.FieldDescriptor field) {
-        return switch (field.getType()) {
-            case INT32, SINT32, SFIXED32, UINT32, FIXED32 -> new Json.JsonNumber((Integer) value);
-            case INT64, SINT64, SFIXED64, UINT64, FIXED64 -> new Json.JsonNumber((Long) value);
+        return switch (field.getJavaType()) {
+            case INT -> new Json.JsonNumber((Integer) value);
+            case LONG -> new Json.JsonNumber((Long) value);
             case FLOAT -> new Json.JsonNumber((Float) value);
             case DOUBLE -> new Json.JsonNumber((Double) value);
-            case BOOL -> new Json.JsonBoolean((Boolean) value);
+            case BOOLEAN -> new Json.JsonBoolean((Boolean) value);
             case STRING -> new Json.JsonString((String) value);
-            case BYTES -> new Json.JsonString(Base64.getEncoder().encodeToString(((ByteString) value).toByteArray()));
+            case BYTE_STRING -> new Json.JsonString(
+                    Base64.getEncoder().encodeToString(((ByteString) value).toByteArray()));
             case ENUM -> new Json.JsonString(((Enum<?>) value).name());
             case MESSAGE -> messageToJsonValue((MessageOrBuilder) value);
-            case GROUP -> throw new Json.WriteException("Group type is not supported in protobuf JSON serialization");
         };
     }
 
@@ -418,8 +409,8 @@ public final class ProtobufCodec implements Json.Codec {
         };
     }
 
-    static void mergeIntoBuilder(Json.JsonValue json, Message.Builder builder) {
-        if (mergeWellKnown(json, builder)) return;
+    static void mergeIntoBuilder(Json.Parser parser, Json.JsonValue json, Message.Builder builder) {
+        if (mergeWellKnown(parser, json, builder)) return;
 
         // special types here, like Date, DateTime
 
@@ -430,7 +421,7 @@ public final class ProtobufCodec implements Json.Codec {
             var field = fieldMap.get(entry.getKey());
             if (field != null) {
                 var getterType = getterType(builder, field);
-                Object v = fromJsonValue(entry.getValue(), getterType);
+                Object v = parser.parseJsonValue(entry.getValue(), getterType);
                 try {
                     if (field.isMapField()) {
                         putAllMethod(builder, field, Map.class).invoke(builder, v);
@@ -535,87 +526,87 @@ public final class ProtobufCodec implements Json.Codec {
         }
     }
 
-    static boolean mergeWellKnown(Json.JsonValue json, Message.Builder builder) {
+    static boolean mergeWellKnown(Json.Parser parser, Json.JsonValue json, Message.Builder builder) {
         if (builder instanceof Timestamp.Builder timestamp) {
-            Instant instant = fromJsonValue(json, Instant.class);
+            Instant instant = parser.parseJsonValue(json, Instant.class);
             timestamp.setSeconds(instant.getEpochSecond());
             timestamp.setNanos(instant.getNano());
             return true;
         }
         if (builder instanceof com.google.protobuf.Duration.Builder duration) {
-            Duration dur = fromJsonValue(json, Duration.class);
+            Duration dur = parser.parseJsonValue(json, Duration.class);
             duration.setSeconds(dur.getSeconds());
             duration.setNanos(dur.getNano());
             return true;
         }
         if (builder instanceof StringValue.Builder stringValue) {
-            stringValue.setValue(fromJsonValue(json, String.class));
+            stringValue.setValue(parser.parseJsonValue(json, String.class));
             return true;
         }
         if (builder instanceof BytesValue.Builder bytesValue) {
-            byte[] bytes = Base64.getDecoder().decode((String) fromJsonValue(json, String.class));
+            byte[] bytes = Base64.getDecoder().decode((String) parser.parseJsonValue(json, String.class));
             bytesValue.setValue(ByteString.copyFrom(bytes));
             return true;
         }
         if (builder instanceof BoolValue.Builder boolValue) {
-            boolValue.setValue(fromJsonValue(json, Boolean.class));
+            boolValue.setValue(parser.parseJsonValue(json, Boolean.class));
             return true;
         }
         if (builder instanceof DoubleValue.Builder doubleValue) {
-            doubleValue.setValue(fromJsonValue(json, Double.class));
+            doubleValue.setValue(parser.parseJsonValue(json, Double.class));
             return true;
         }
         if (builder instanceof FloatValue.Builder floatValue) {
-            floatValue.setValue(fromJsonValue(json, Float.class));
+            floatValue.setValue(parser.parseJsonValue(json, Float.class));
             return true;
         }
         if (builder instanceof Int32Value.Builder int32Value) {
-            int32Value.setValue(fromJsonValue(json, Integer.class));
+            int32Value.setValue(parser.parseJsonValue(json, Integer.class));
             return true;
         }
         if (builder instanceof UInt32Value.Builder uint32Value) {
-            uint32Value.setValue(fromJsonValue(json, Integer.class));
+            uint32Value.setValue(parser.parseJsonValue(json, Integer.class));
             return true;
         }
         if (builder instanceof Int64Value.Builder int64Value) {
-            int64Value.setValue(fromJsonValue(json, Long.class));
+            int64Value.setValue(parser.parseJsonValue(json, Long.class));
             return true;
         }
         if (builder instanceof UInt64Value.Builder uint64Value) {
-            uint64Value.setValue(fromJsonValue(json, Long.class));
+            uint64Value.setValue(parser.parseJsonValue(json, Long.class));
             return true;
         }
         if (builder instanceof FieldMask.Builder fieldMask) {
-            String str = fromJsonValue(json, String.class);
+            String str = parser.parseJsonValue(json, String.class);
             for (var s : str.split(",")) fieldMask.addPaths(s);
             return true;
         }
         if (builder instanceof Struct.Builder struct) {
             for (var entry : expectObject(json).value().entrySet()) {
-                struct.putFields(entry.getKey(), toValue(entry.getValue()));
+                struct.putFields(entry.getKey(), toValue(parser, entry.getValue()));
             }
             return true;
         }
         if (builder instanceof ListValue.Builder list) {
             var ja = json instanceof Json.JsonArray ? (Json.JsonArray) json : new Json.JsonArray(List.of(json));
-            for (var v : ja.value()) list.addValues(toValue(v));
+            for (var v : ja.value()) list.addValues(toValue(parser, v));
             return true;
         }
         if (builder instanceof Value.Builder value) {
-            value.mergeFrom(toValue(json));
+            value.mergeFrom(toValue(parser, json));
             return true;
         }
         if (builder instanceof Empty.Builder) {
             return true;
         }
         if (builder instanceof Any.Builder any) {
-            parseAny(expectObject(json), any);
+            parseAny(parser, expectObject(json), any);
             return true;
         }
         return false;
     }
 
-    static void parseAny(Json.JsonObject jo, Any.Builder anyBuilder) {
+    static void parseAny(Json.Parser parser, Json.JsonObject jo, Any.Builder anyBuilder) {
         Json.JsonValue typeValue = jo.value().get("@type");
         if (typeValue == null) throw new Json.ConversionException("Any type must have @type field");
         if (!(typeValue instanceof Json.JsonString typeStr))
@@ -645,7 +636,7 @@ public final class ProtobufCodec implements Json.Codec {
 
             // Parse the nested message using the actual Message class
             Message.Builder builder = newBuilder(messageClass);
-            mergeIntoBuilder(valueToDeserialize, builder);
+            mergeIntoBuilder(parser, valueToDeserialize, builder);
             Message nestedMessage = builder.build();
 
             // Pack into Any
@@ -689,9 +680,9 @@ public final class ProtobufCodec implements Json.Codec {
                 "Cannot coerce " + jv.getClass().getSimpleName() + " to enum " + raw.getName());
     }
 
-    static Object parseSpecialType(Json.JsonValue jv, Class<?> raw) {
+    static Object parseSpecialType(Json.Parser parser, Json.JsonValue jv, Class<?> raw) {
         if (typeBetween(raw, LazyStringArrayList.class, ProtocolStringList.class)) {
-            List<String> list = fromJsonValue(jv, new Json.Type<List<String>>() {}.getType());
+            List<String> list = parser.parseJsonValue(jv, new Json.Type<List<String>>() {}.getType());
             return new LazyStringArrayList(list);
         }
         throw new Json.ConversionException("Not a supported type: " + raw.getName());
@@ -736,7 +727,7 @@ public final class ProtobufCodec implements Json.Codec {
                 + value.getClass().getSimpleName());
     }
 
-    static Value toValue(Json.JsonValue value) {
+    static Value toValue(Json.Parser parser, Json.JsonValue value) {
         var builder = Value.newBuilder();
         if (value instanceof Json.JsonNull) builder.setNullValue(NullValue.NULL_VALUE);
         else if (value instanceof Json.JsonBoolean b) builder.setBoolValue(b.value());
@@ -745,11 +736,11 @@ public final class ProtobufCodec implements Json.Codec {
         else if (value instanceof Json.JsonString s) builder.setStringValue(s.value());
         else if (value instanceof Json.JsonObject o) {
             var sb = Struct.newBuilder();
-            mergeIntoBuilder(o, sb);
+            mergeIntoBuilder(parser, o, sb);
             builder.setStructValue(sb.build());
         } else if (value instanceof Json.JsonArray a) {
             var lb = ListValue.newBuilder();
-            mergeIntoBuilder(a, lb);
+            mergeIntoBuilder(parser, a, lb);
             builder.setListValue(lb.build());
         }
         return builder.build();
