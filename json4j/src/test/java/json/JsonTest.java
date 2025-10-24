@@ -164,6 +164,7 @@ class JsonTest {
                     // Record/Bean
                     {new RecordPerson("Alice", 30, LocalDate.parse("1993-05-15")), "{\"name\":\"Alice\",\"age\":30,\"birthDate\":\"1993-05-15\"}"},
                     {new ClassPerson() {{ setName("Bob"); setAge(25); setBirthDate(LocalDate.parse("1998-10-20")); }}, "{\"age\":25,\"birthDate\":\"1998-10-20\",\"name\":\"Bob\"}"},
+                    {new Object(), "{}"},
 
                     // Protobuf support (codec)
                     {User.newBuilder().setId(1).setName("Freeman").setStatus(User.Status.ACTIVE).addAllHobbyList(List.of(Hobby.newBuilder().setId(1).setName("gaming").build())).putAllHobbyMap(Map.of(1L, Hobby.newBuilder().setId(1).setName("gaming").build())).build(), "{\"id\":1,\"name\":\"Freeman\",\"status\":\"ACTIVE\",\"hobbyList\":[{\"id\":1,\"name\":\"gaming\"}],\"hobbyMap\":{\"1\":{\"id\":1,\"name\":\"gaming\"}}}"},
@@ -332,6 +333,7 @@ class JsonTest {
 
                     // Bean
                     // Loose parsing snake_case to camelCase
+                    {"{}", new Json.Type<Object>(){}, new LinkedHashMap<>()},
                     {"{\"name\":\"Bob\",\"birth_date\":\"1998-10-20\"}", new Json.Type<ClassPerson>() {}, new ClassPerson() {{ setName("Bob"); setBirthDate(LocalDate.parse("1998-10-20")); }}},
 
                     // Protobuf support (codec)
