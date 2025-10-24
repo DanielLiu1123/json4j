@@ -1,6 +1,7 @@
 package json;
 
 import java.beans.Introspector;
+import java.io.Writer;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.GenericArrayType;
@@ -81,10 +82,10 @@ import lombok.Singular;
  */
 public final class Json {
 
-    private static final List<Codec> codecs = loadCodecs();
-
-    private static final Writer defaultWriter = Writer.builder().build();
-    private static final Parser defaultParser = Parser.builder().build();
+    private static final Writer defaultWriter =
+            Writer.builder().serializers(loadSerializers()).build();
+    private static final Parser defaultParser =
+            Parser.builder().deserializers(loadDeserializers()).build();
 
     private Json() {
         throw new UnsupportedOperationException();
@@ -169,317 +170,7 @@ public final class Json {
     public record JsonString(String value) implements JsonValue {}
 
     // ============================================================
-    // Extension point
-    // ============================================================
-
-    public interface Codec {
-        boolean canSerialize(Object o);
-
-        String serialize(Json.Writer writer, Object o);
-
-        boolean canDeserialize(JsonValue jsonValue, java.lang.reflect.Type targetType);
-
-        Object deserialize(Json.Parser parser, JsonValue jsonValue, java.lang.reflect.Type targetType);
-    }
-
-    public interface Serializer {
-        boolean canSerialize(Object o);
-
-        String serialize(Json.Writer writer, Object o);
-    }
-
-    public interface Deserializer {
-        boolean canDeserialize(JsonValue jsonValue, java.lang.reflect.Type targetType);
-
-        Object deserialize(Json.Parser parser, JsonValue jsonValue, java.lang.reflect.Type targetType);
-    }
-
-    // ============================================================
-    // Type token
-    // ============================================================
-
-    public abstract static class Type<T> {
-        private final java.lang.reflect.Type type;
-
-        protected Type() {
-            Class<?> c = findTypeSubclass(getClass());
-            var p = (ParameterizedType) c.getGenericSuperclass();
-            this.type = p.getActualTypeArguments()[0];
-        }
-
-        private Type(java.lang.reflect.Type t) {
-            this.type = t;
-        }
-
-        public static <T> Type<T> of(Class<T> clazz) {
-            return new Type<>(clazz) {};
-        }
-
-        public java.lang.reflect.Type getType() {
-            return type;
-        }
-
-        private static Class<?> findTypeSubclass(Class<?> child) {
-            Class<?> parent = child.getSuperclass();
-            if (parent == Type.class) return child;
-            if (parent == Object.class) throw new IllegalStateException("Expected Json.Type superclass");
-            return findTypeSubclass(parent);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return o instanceof Type<?> t && Objects.equals(type, t.type);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(type);
-        }
-
-        @Override
-        public String toString() {
-            return "Type{" + type + '}';
-        }
-    }
-
-    // ============================================================
-    // Lexer / Parser
-    // ============================================================
-
-    enum Token {
-        LBRACE,
-        RBRACE,
-        LBRACKET,
-        RBRACKET,
-        COLON,
-        COMMA,
-        STRING,
-        NUMBER,
-        TRUE,
-        FALSE,
-        NULL,
-        EOF
-    }
-
-    static final class Lexer {
-        private final String s;
-        private int i = 0, line = 1, col = 1;
-        private Token current;
-        private String stringValue, numberLexeme;
-
-        Lexer(String s) {
-            this.s = Objects.requireNonNull(s);
-            advance();
-        }
-
-        Token current() {
-            return current;
-        }
-
-        String string() {
-            return stringValue;
-        }
-
-        String number() {
-            return numberLexeme;
-        }
-
-        int line() {
-            return line;
-        }
-
-        int col() {
-            return col;
-        }
-
-        void advance() {
-            skipWs();
-            if (eof()) {
-                current = Token.EOF;
-                return;
-            }
-            char c = peek();
-            switch (c) {
-                case '{' -> {
-                    consume();
-                    current = Token.LBRACE;
-                }
-                case '}' -> {
-                    consume();
-                    current = Token.RBRACE;
-                }
-                case '[' -> {
-                    consume();
-                    current = Token.LBRACKET;
-                }
-                case ']' -> {
-                    consume();
-                    current = Token.RBRACKET;
-                }
-                case ':' -> {
-                    consume();
-                    current = Token.COLON;
-                }
-                case ',' -> {
-                    consume();
-                    current = Token.COMMA;
-                }
-                case '"' -> {
-                    stringValue = readString();
-                    current = Token.STRING;
-                }
-                case 't' -> {
-                    readKeyword("true");
-                    current = Token.TRUE;
-                }
-                case 'f' -> {
-                    readKeyword("false");
-                    current = Token.FALSE;
-                }
-                case 'n' -> {
-                    readKeyword("null");
-                    current = Token.NULL;
-                }
-                default -> {
-                    if (c == '-' || isDigit(c)) {
-                        numberLexeme = readNumber();
-                        current = Token.NUMBER;
-                    } else error("Unexpected character: '" + c + "'");
-                }
-            }
-        }
-
-        private void skipWs() {
-            while (!eof()) {
-                char c = peek();
-                if (c == ' ' || c == '\t' || c == '\r') consume();
-                else if (c == '\n') {
-                    consume();
-                    line++;
-                    col = 1;
-                } else break;
-            }
-        }
-
-        private String readString() {
-            consume(); // opening "
-            StringBuilder sb = new StringBuilder();
-            while (!eof()) {
-                char c = consume();
-                if (c == '"') return sb.toString();
-                if (c == '\\') {
-                    if (eof()) error("Unterminated escape sequence");
-                    char e = consume();
-                    switch (e) {
-                        case '"' -> sb.append('"');
-                        case '\\' -> sb.append('\\');
-                        case '/' -> sb.append('/');
-                        case 'b' -> sb.append('\b');
-                        case 'f' -> sb.append('\f');
-                        case 'n' -> sb.append('\n');
-                        case 'r' -> sb.append('\r');
-                        case 't' -> sb.append('\t');
-                        case 'u' -> {
-                            int cp = readHex4();
-                            if (Character.isHighSurrogate((char) cp)) {
-                                if (peek() == '\\' && peekNext() == 'u') {
-                                    consume();
-                                    consume();
-                                    int low = readHex4();
-                                    if (!Character.isLowSurrogate((char) low))
-                                        error("Invalid low surrogate in unicode escape");
-                                    sb.appendCodePoint(Character.toCodePoint((char) cp, (char) low));
-                                } else error("High surrogate not followed by low surrogate in unicode escape");
-                            } else if (Character.isLowSurrogate((char) cp)) {
-                                error("Unexpected low surrogate in unicode escape");
-                            } else sb.append((char) cp);
-                        }
-                        default -> error("Invalid escape sequence: \\" + e);
-                    }
-                } else {
-                    if (c < 0x20) error("Unescaped control character in string (ASCII " + (int) c + ")");
-                    sb.append(c);
-                }
-            }
-            error("Unterminated string literal");
-            return null;
-        }
-
-        private int readHex4() {
-            int cp = 0;
-            for (int k = 0; k < 4; k++) {
-                if (eof()) error("Unexpected end of input in \\u escape sequence");
-                int v = hexVal(consume());
-                if (v < 0) error("Invalid hexadecimal digit in \\u escape sequence");
-                cp = (cp << 4) | v;
-            }
-            return cp;
-        }
-
-        private static int hexVal(char c) {
-            if (c >= '0' && c <= '9') return c - '0';
-            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-            return -1;
-        }
-
-        private void readKeyword(String kw) {
-            for (int k = 0; k < kw.length(); k++) {
-                if (eof() || peek() != kw.charAt(k)) error("Invalid literal, expected '" + kw + "'");
-                consume();
-            }
-        }
-
-        private String readNumber() {
-            int start = i;
-            if (peek() == '-') consume();
-            if (eof()) error("Unexpected end of input while parsing number");
-            if (peek() == '0') consume();
-            else if (isDigit(peek())) while (!eof() && isDigit(peek())) consume();
-            else error("Invalid number format (integer part)");
-            if (!eof() && peek() == '.') {
-                consume();
-                if (eof() || !isDigit(peek())) error("Invalid number format (fractional part)");
-                while (!eof() && isDigit(peek())) consume();
-            }
-            if (!eof() && (peek() == 'e' || peek() == 'E')) {
-                consume();
-                if (!eof() && (peek() == '+' || peek() == '-')) consume();
-                if (eof() || !isDigit(peek())) error("Invalid number format (exponent part)");
-                while (!eof() && isDigit(peek())) consume();
-            }
-            return s.substring(start, i);
-        }
-
-        private boolean eof() {
-            return i >= s.length();
-        }
-
-        private char peek() {
-            return s.charAt(i);
-        }
-
-        private char peekNext() {
-            return (i + 1 < s.length()) ? s.charAt(i + 1) : '\0';
-        }
-
-        private char consume() {
-            char c = s.charAt(i++);
-            col++;
-            return c;
-        }
-
-        private static boolean isDigit(char c) {
-            return c >= '0' && c <= '9';
-        }
-
-        private void error(String msg) {
-            throw new SyntaxException(msg + " at line " + line + ", column " + col);
-        }
-    }
-
-    // ============================================================
-    // Writer (correct escaping, faster stringify)
+    // Writer
     // ============================================================
 
     @Builder(toBuilder = true)
@@ -488,11 +179,12 @@ public final class Json {
         @Singular("serializer")
         private final List<Serializer> serializers;
 
-        public static void main(String[] args) {
-            var build = Writer.builder().build();
-            System.out.println(build);
-        }
-
+        /**
+         * Serialize any Java object to a JSON string.
+         *
+         * @param o the object to serialize
+         * @return the JSON string
+         */
         public String write(Object o) {
             var sb = new StringBuilder();
             write(sb, o);
@@ -508,9 +200,9 @@ public final class Json {
                 writeJsonValue(out, jv);
                 return;
             }
-            for (var codec : codecs) {
-                if (codec.canSerialize(o)) {
-                    out.append(codec.serialize(this, o));
+            for (var serializer : serializers) {
+                if (serializer.canSerialize(o)) {
+                    out.append(serializer.serialize(this, o));
                     return;
                 }
             }
@@ -758,7 +450,7 @@ public final class Json {
             out.append(n);
         }
 
-        private void writeArray(StringBuilder out, Object arr) {
+        void writeArray(StringBuilder out, Object arr) {
             out.append('[');
             int len = Array.getLength(arr);
             for (int i = 0; i < len; i++) {
@@ -768,7 +460,7 @@ public final class Json {
             out.append(']');
         }
 
-        private void writeCollection(StringBuilder out, Collection<?> coll) {
+        void writeCollection(StringBuilder out, Collection<?> coll) {
             out.append('[');
             boolean first = true;
             for (Object e : coll) {
@@ -779,7 +471,7 @@ public final class Json {
             out.append(']');
         }
 
-        private void writeMap(StringBuilder out, Map<?, ?> map) {
+        void writeMap(StringBuilder out, Map<?, ?> map) {
             out.append('{');
             boolean first = true;
             for (var en : map.entrySet()) {
@@ -792,7 +484,7 @@ public final class Json {
             out.append('}');
         }
 
-        private void writeRecord(StringBuilder out, Object r) {
+        void writeRecord(StringBuilder out, Object r) {
             out.append('{');
             boolean first = true;
             for (var c : r.getClass().getRecordComponents()) {
@@ -820,7 +512,7 @@ public final class Json {
             out.append('}');
         }
 
-        private void writeBean(StringBuilder out, Object bean) {
+        void writeBean(StringBuilder out, Object bean) {
             out.append('{');
             boolean first = true;
             try {
@@ -894,56 +586,80 @@ public final class Json {
         @Singular("deserializer")
         private final List<Deserializer> deserializers;
 
+        /**
+         * Parse JSON string into an instance of the target class.
+         *
+         * @param json the JSON string
+         * @param clazz the target class
+         * @param <T> the target type
+         * @return the parsed instance
+         */
         public <T> T parse(String json, Class<T> clazz) {
             return parse(json, Type.of(clazz));
         }
 
+        /**
+         * Parse JSON string into an instance of the target type.
+         *
+         * @param json the JSON string
+         * @param type the target type token
+         * @param <T> the target type
+         * @return the parsed instance
+         */
         public <T> T parse(String json, Type<T> type) {
             var jv = parseJsonValue(new Lexer(json));
             return parseJsonValue(jv, canonicalize(type.getType()));
         }
 
+        /**
+         * Parse JSON value into an instance of the target type.
+         *
+         * @param jsonValue the JSON value
+         * @param type the target type
+         * @param <T> the target type
+         * @return the parsed instance
+         */
         @SuppressWarnings("unchecked")
-        public <T> T parseJsonValue(JsonValue jv, java.lang.reflect.Type targetType) {
+        public <T> T parseJsonValue(JsonValue jsonValue, java.lang.reflect.Type type) {
             // Normalize reflective type, obtain raw class
-            targetType = canonicalize(targetType);
-            Class<?> raw = raw(targetType);
+            type = canonicalize(type);
+            Class<?> raw = raw(type);
 
             // 0) Trivial/dynamic targets
-            if (raw == Object.class) return (T) fromUntyped(jv); // best-effort untyped
-            if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jv, raw); // return AST as-is
+            if (raw == Object.class) return (T) fromUntyped(jsonValue); // best-effort untyped
+            if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jsonValue, raw); // return AST as-is
 
             // Custom codec
-            for (var codec : codecs) {
-                if (codec.canDeserialize(jv, targetType)) {
-                    return (T) codec.deserialize(this, jv, targetType);
+            for (var deserializer : deserializers) {
+                if (deserializer.canDeserialize(jsonValue, type)) {
+                    return (T) deserializer.deserialize(this, jsonValue, type);
                 }
             }
 
             // 1) Null handling
-            if (jv instanceof JsonNull) return (T) toNull(raw);
+            if (jsonValue instanceof JsonNull) return (T) toNull(raw);
 
             // 2) Scalar targets (LOOSE)
 
             // 2.1 boolean: accept JsonBoolean, "true"/"false", "1"/"0", numeric 1/0
             if (raw == boolean.class || raw == Boolean.class || raw == AtomicBoolean.class) {
-                return (T) toBoolean(jv, raw);
+                return (T) toBoolean(jsonValue, raw);
             }
 
             // 2.2 number: accept JsonNumber, numeric strings, and booleans (true->1, false->0)
             // AtomicInteger and AtomicLong are Number subclasses, so they're handled here
             if (Number.class.isAssignableFrom(raw) || (raw.isPrimitive() && raw != char.class)) {
-                return (T) toNumber(jv, raw);
+                return (T) toNumber(jsonValue, raw);
             }
 
             // 2.3 String/CharSequence: stringify any JsonValue (numbers/booleans become their textual form)
             if (raw == String.class || raw == CharSequence.class) {
-                return (T) Json.toString(jv); // json string should have quote, Java String should not have quote
+                return (T) Json.toString(jsonValue); // json string should have quote, Java String should not have quote
             }
 
             // 2.4 char/Character: accept 1-char string (or stringify first)
             if (raw == char.class || raw == Character.class) {
-                String s = Json.toString(jv);
+                String s = Json.toString(jsonValue);
                 if (s.length() != 1)
                     throw new ConversionException(
                             "Cannot convert string to char: expected length 1, got " + s.length() + " (\"" + s + "\")");
@@ -952,56 +668,59 @@ public final class Json {
 
             // 2.5 enum: accept name (case-insensitive) or ordinal number (string/number)
             if (raw.isEnum()) {
-                return (T) toEnum(jv, raw);
+                return (T) toEnum(jsonValue, raw);
             }
 
             // 2.6 temporal: accept ISO-8601 string or epoch millis (number/string)
             if (isTemporal(raw)) {
-                return (T) toTemporal(jv, raw);
+                return (T) toTemporal(jsonValue, raw);
             }
 
             // 2.7 string-based types, like UUID, URI...
             if (isStringBasedType(raw)) {
-                return (T) toStringBasedType(jv, raw);
+                return (T) toStringBasedType(jsonValue, raw);
             }
 
             // 2.8 optional: wrap the inner type
             if (raw == Optional.class) {
-                return (T) toOptional(jv, targetType);
+                return (T) toOptional(jsonValue, type);
             }
 
             // 2.9 AtomicReference: wrap the inner type
             if (raw == AtomicReference.class) {
                 return (T) new AtomicReference<>(
-                        parseJsonValue(jv, ((ParameterizedType) targetType).getActualTypeArguments()[0]));
+                        parseJsonValue(jsonValue, ((ParameterizedType) type).getActualTypeArguments()[0]));
             }
 
             // 3) Structured targets (LOOSE)
 
             // 3.1 arrays: if non-array provided, wrap single element
             if (raw.isArray()) {
-                JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
+                JsonArray ja =
+                        (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
                 return (T) toArray(ja, raw.getComponentType());
             }
 
             // 3.2 Collection: if non-array provided, wrap single element
             if (Collection.class.isAssignableFrom(raw)) {
-                JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-                return (T) toCollection(ja, targetType);
+                JsonArray ja =
+                        (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
+                return (T) toCollection(ja, type);
             }
 
             // 3.3 Stream
             if (BaseStream.class.isAssignableFrom(raw)) {
-                JsonArray ja = (jv instanceof JsonArray) ? (JsonArray) jv : new JsonArray(List.of(jv));
-                return (T) toStream(ja, targetType);
+                JsonArray ja =
+                        (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
+                return (T) toStream(ja, type);
             }
 
             // Must JsonObject here!
-            JsonObject jo = expectObject(jv);
+            JsonObject jo = expectObject(jsonValue);
 
             // 3.4 Map
             if (Map.class.isAssignableFrom(raw)) {
-                return (T) toMap(jo, targetType);
+                return (T) toMap(jo, type);
             }
 
             // 3.5 Record
@@ -1412,6 +1131,416 @@ public final class Json {
         }
     }
 
+    // ============================================================
+    // Extension points
+    // ============================================================
+
+    /**
+     * Interface for custom JSON serialization.
+     *
+     * <p> 0.5.0
+     */
+    public interface Serializer {
+        /**
+         * Checks if this serializer can handle the given object.
+         *
+         * @param o the object to be serialized
+         * @return true if this serializer can handle the given object
+         */
+        boolean canSerialize(Object o);
+
+        /**
+         * Serializes the given object to a JSON string.
+         *
+         * @param writer the JSON writer
+         * @param o the object to be serialized
+         * @return the JSON string representation of the object
+         */
+        String serialize(Json.Writer writer, Object o);
+    }
+
+    /**
+     * Interface for custom JSON deserialization.
+     *
+     * <p> 0.5.0
+     */
+    public interface Deserializer {
+        /**
+         * Checks if this deserializer can handle the given JSON value and target Java type.
+         *
+         * @param jsonValue the JSON value to be deserialized
+         * @param targetType the target Java type
+         * @return true if this deserializer can handle the given JSON value and target type
+         */
+        boolean canDeserialize(JsonValue jsonValue, java.lang.reflect.Type targetType);
+
+        /**
+         * Deserializes the given JSON value into an instance of the target Java type.
+         *
+         * @param parser the JSON parser
+         * @param jsonValue the JSON value to be deserialized
+         * @param targetType the target Java type
+         * @return the deserialized Java object
+         */
+        Object deserialize(Json.Parser parser, JsonValue jsonValue, java.lang.reflect.Type targetType);
+    }
+
+    // ============================================================
+    // Type token
+    // ============================================================
+
+    /**
+     * Type token to represent generic Java types, including parameterized types.
+     *
+     * @param <T> The Java type represented by this type token.
+     * @see <a href="https://gafter.blogspot.com/2006/12/super-type-tokens.html">Super Type Tokens</a>
+     */
+    public abstract static class Type<T> {
+        private final java.lang.reflect.Type type;
+
+        protected Type() {
+            Class<?> c = findTypeSubclass(getClass());
+            var p = (ParameterizedType) c.getGenericSuperclass();
+            this.type = p.getActualTypeArguments()[0];
+        }
+
+        private Type(java.lang.reflect.Type t) {
+            this.type = t;
+        }
+
+        public static <T> Type<T> of(Class<T> clazz) {
+            return new Type<>(clazz) {};
+        }
+
+        public java.lang.reflect.Type getType() {
+            return type;
+        }
+
+        private static Class<?> findTypeSubclass(Class<?> child) {
+            Class<?> parent = child.getSuperclass();
+            if (parent == Type.class) return child;
+            if (parent == Object.class) throw new IllegalStateException("Expected Json.Type superclass");
+            return findTypeSubclass(parent);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Type<?> t && Objects.equals(type, t.type);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(type);
+        }
+
+        @Override
+        public String toString() {
+            return "Type{" + type + '}';
+        }
+    }
+
+    /**
+     * Exception thrown when JSON parsing, serialization, or type conversion fails.
+     * This is the base exception for all json4j-related errors.
+     *
+     * @author Freeman
+     * @since 0.3.0
+     */
+    public abstract static class Exception extends RuntimeException {
+        public Exception(String message) {
+            super(message);
+        }
+
+        public Exception(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Exception thrown during JSON serialization (write operations).
+     *
+     * <p> This exception is thrown when converting Java objects to JSON fails.
+     *
+     * @since 0.3.0
+     */
+    public static class WriteException extends Exception {
+        public WriteException(String message) {
+            super(message);
+        }
+
+        public WriteException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Exception thrown when JSON parsing fails due to malformed JSON syntax.
+     *
+     * @since 0.3.0
+     */
+    public static class SyntaxException extends Exception {
+        public SyntaxException(String message) {
+            super(message);
+        }
+
+        public SyntaxException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Exception thrown when converting {@link JsonValue} to Java objects fails during deserialization.
+     *
+     * <p> This includes type conversion errors, bean/record mapping errors, and other conversion failures.
+     *
+     * @since 0.3.0
+     */
+    public static class ConversionException extends Exception {
+        public ConversionException(String message) {
+            super(message);
+        }
+
+        public ConversionException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    // ============================================================
+    // Internal
+    // ============================================================
+
+    enum Token {
+        LBRACE,
+        RBRACE,
+        LBRACKET,
+        RBRACKET,
+        COLON,
+        COMMA,
+        STRING,
+        NUMBER,
+        TRUE,
+        FALSE,
+        NULL,
+        EOF
+    }
+
+    static final class Lexer {
+        private final String s;
+        private int i = 0, line = 1, col = 1;
+        private Token current;
+        private String stringValue, numberLexeme;
+
+        Lexer(String s) {
+            this.s = Objects.requireNonNull(s);
+            advance();
+        }
+
+        Token current() {
+            return current;
+        }
+
+        String string() {
+            return stringValue;
+        }
+
+        String number() {
+            return numberLexeme;
+        }
+
+        int line() {
+            return line;
+        }
+
+        int col() {
+            return col;
+        }
+
+        void advance() {
+            skipWs();
+            if (eof()) {
+                current = Token.EOF;
+                return;
+            }
+            char c = peek();
+            switch (c) {
+                case '{' -> {
+                    consume();
+                    current = Token.LBRACE;
+                }
+                case '}' -> {
+                    consume();
+                    current = Token.RBRACE;
+                }
+                case '[' -> {
+                    consume();
+                    current = Token.LBRACKET;
+                }
+                case ']' -> {
+                    consume();
+                    current = Token.RBRACKET;
+                }
+                case ':' -> {
+                    consume();
+                    current = Token.COLON;
+                }
+                case ',' -> {
+                    consume();
+                    current = Token.COMMA;
+                }
+                case '"' -> {
+                    stringValue = readString();
+                    current = Token.STRING;
+                }
+                case 't' -> {
+                    readKeyword("true");
+                    current = Token.TRUE;
+                }
+                case 'f' -> {
+                    readKeyword("false");
+                    current = Token.FALSE;
+                }
+                case 'n' -> {
+                    readKeyword("null");
+                    current = Token.NULL;
+                }
+                default -> {
+                    if (c == '-' || isDigit(c)) {
+                        numberLexeme = readNumber();
+                        current = Token.NUMBER;
+                    } else error("Unexpected character: '" + c + "'");
+                }
+            }
+        }
+
+        private void skipWs() {
+            while (!eof()) {
+                char c = peek();
+                if (c == ' ' || c == '\t' || c == '\r') consume();
+                else if (c == '\n') {
+                    consume();
+                    line++;
+                    col = 1;
+                } else break;
+            }
+        }
+
+        private String readString() {
+            consume(); // opening "
+            StringBuilder sb = new StringBuilder();
+            while (!eof()) {
+                char c = consume();
+                if (c == '"') return sb.toString();
+                if (c == '\\') {
+                    if (eof()) error("Unterminated escape sequence");
+                    char e = consume();
+                    switch (e) {
+                        case '"' -> sb.append('"');
+                        case '\\' -> sb.append('\\');
+                        case '/' -> sb.append('/');
+                        case 'b' -> sb.append('\b');
+                        case 'f' -> sb.append('\f');
+                        case 'n' -> sb.append('\n');
+                        case 'r' -> sb.append('\r');
+                        case 't' -> sb.append('\t');
+                        case 'u' -> {
+                            int cp = readHex4();
+                            if (Character.isHighSurrogate((char) cp)) {
+                                if (peek() == '\\' && peekNext() == 'u') {
+                                    consume();
+                                    consume();
+                                    int low = readHex4();
+                                    if (!Character.isLowSurrogate((char) low))
+                                        error("Invalid low surrogate in unicode escape");
+                                    sb.appendCodePoint(Character.toCodePoint((char) cp, (char) low));
+                                } else error("High surrogate not followed by low surrogate in unicode escape");
+                            } else if (Character.isLowSurrogate((char) cp)) {
+                                error("Unexpected low surrogate in unicode escape");
+                            } else sb.append((char) cp);
+                        }
+                        default -> error("Invalid escape sequence: \\" + e);
+                    }
+                } else {
+                    if (c < 0x20) error("Unescaped control character in string (ASCII " + (int) c + ")");
+                    sb.append(c);
+                }
+            }
+            error("Unterminated string literal");
+            return null;
+        }
+
+        private int readHex4() {
+            int cp = 0;
+            for (int k = 0; k < 4; k++) {
+                if (eof()) error("Unexpected end of input in \\u escape sequence");
+                int v = hexVal(consume());
+                if (v < 0) error("Invalid hexadecimal digit in \\u escape sequence");
+                cp = (cp << 4) | v;
+            }
+            return cp;
+        }
+
+        private static int hexVal(char c) {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            return -1;
+        }
+
+        private void readKeyword(String kw) {
+            for (int k = 0; k < kw.length(); k++) {
+                if (eof() || peek() != kw.charAt(k)) error("Invalid literal, expected '" + kw + "'");
+                consume();
+            }
+        }
+
+        private String readNumber() {
+            int start = i;
+            if (peek() == '-') consume();
+            if (eof()) error("Unexpected end of input while parsing number");
+            if (peek() == '0') consume();
+            else if (isDigit(peek())) while (!eof() && isDigit(peek())) consume();
+            else error("Invalid number format (integer part)");
+            if (!eof() && peek() == '.') {
+                consume();
+                if (eof() || !isDigit(peek())) error("Invalid number format (fractional part)");
+                while (!eof() && isDigit(peek())) consume();
+            }
+            if (!eof() && (peek() == 'e' || peek() == 'E')) {
+                consume();
+                if (!eof() && (peek() == '+' || peek() == '-')) consume();
+                if (eof() || !isDigit(peek())) error("Invalid number format (exponent part)");
+                while (!eof() && isDigit(peek())) consume();
+            }
+            return s.substring(start, i);
+        }
+
+        private boolean eof() {
+            return i >= s.length();
+        }
+
+        private char peek() {
+            return s.charAt(i);
+        }
+
+        private char peekNext() {
+            return (i + 1 < s.length()) ? s.charAt(i + 1) : '\0';
+        }
+
+        private char consume() {
+            char c = s.charAt(i++);
+            col++;
+            return c;
+        }
+
+        private static boolean isDigit(char c) {
+            return c >= '0' && c <= '9';
+        }
+
+        private void error(String msg) {
+            throw new SyntaxException(msg + " at line " + line + ", column " + col);
+        }
+    }
+
     static int mapCap(int size) {
         int n = -1 >>> Integer.numberOfLeadingZeros(size - 1);
         return (n < 0) ? 1 : (n >= 1 << 30) ? 1 << 30 : n + 1;
@@ -1649,14 +1778,16 @@ public final class Json {
         throw new ConversionException("Cannot convert " + jv.getClass().getSimpleName() + " to " + raw.getSimpleName());
     }
 
-    // ============================================================
-    // Type utils
-    // ============================================================
+    static List<Serializer> loadSerializers() {
+        var serializers = new ArrayList<Serializer>();
+        for (var e : ServiceLoader.load(Serializer.class)) serializers.add(e);
+        return serializers;
+    }
 
-    static List<Codec> loadCodecs() {
-        var codecs = new ArrayList<Codec>();
-        for (var c : ServiceLoader.load(Codec.class)) codecs.add(c);
-        return codecs;
+    static List<Deserializer> loadDeserializers() {
+        var deserializers = new ArrayList<Deserializer>();
+        for (var e : ServiceLoader.load(Deserializer.class)) deserializers.add(e);
+        return deserializers;
     }
 
     static Class<?> raw(java.lang.reflect.Type t) {
@@ -1698,71 +1829,5 @@ public final class Json {
     static java.lang.reflect.Type erasureOf(TypeVariable<?> tv) {
         var uppers = tv.getBounds();
         return uppers.length == 0 ? Object.class : uppers[0];
-    }
-
-    /**
-     * Exception thrown when JSON parsing, serialization, or type conversion fails.
-     * This is the base exception for all json4j-related errors.
-     *
-     * @author Freeman
-     * @since 0.3.0
-     */
-    public abstract static class Exception extends RuntimeException {
-        public Exception(String message) {
-            super(message);
-        }
-
-        public Exception(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    /**
-     * Exception thrown during JSON serialization (write operations).
-     *
-     * <p> This exception is thrown when converting Java objects to JSON fails.
-     *
-     * @since 0.3.0
-     */
-    public static class WriteException extends Exception {
-        public WriteException(String message) {
-            super(message);
-        }
-
-        public WriteException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    /**
-     * Exception thrown when JSON parsing fails due to malformed JSON syntax.
-     *
-     * @since 0.3.0
-     */
-    public static class SyntaxException extends Exception {
-        public SyntaxException(String message) {
-            super(message);
-        }
-
-        public SyntaxException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    /**
-     * Exception thrown when converting {@link JsonValue} to Java objects fails during deserialization.
-     *
-     * <p> This includes type conversion errors, bean/record mapping errors, and other conversion failures.
-     *
-     * @since 0.3.0
-     */
-    public static class ConversionException extends Exception {
-        public ConversionException(String message) {
-            super(message);
-        }
-
-        public ConversionException(String message, Throwable cause) {
-            super(message, cause);
-        }
     }
 }

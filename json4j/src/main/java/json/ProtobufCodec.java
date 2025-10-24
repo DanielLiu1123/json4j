@@ -75,7 +75,7 @@ import java.util.jar.JarFile;
  * @author Freeman
  * @since 0.2.0
  */
-public final class ProtobufCodec implements Json.Codec {
+public final class ProtobufCodec implements Json.Serializer, Json.Deserializer {
 
     private static final boolean PROTOBUF_PRESENT = isClassPresent("com.google.protobuf.Message");
 
