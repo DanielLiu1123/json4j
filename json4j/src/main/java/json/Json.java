@@ -236,6 +236,13 @@ public final class Json {
                 out.append(ab.get() ? "true" : "false");
                 return;
             }
+
+            // temporal types -> string
+            if (writeTemporal(out, o)) return;
+
+            // string-based types -> string
+            if (writeStringBasedType(out, o)) return;
+
             // AtomicReference: extract the value and serialize
             if (o instanceof AtomicReference<?> ar) {
                 write(out, ar.get());
@@ -245,7 +252,7 @@ public final class Json {
                 writeArray(out, o);
                 return;
             }
-            if (o instanceof Collection<?> coll) {
+            if (o instanceof Iterable<?> coll) {
                 writeCollection(out, coll);
                 return;
             }
@@ -261,12 +268,6 @@ public final class Json {
                 writeString(out, e.name());
                 return;
             }
-
-            // temporal types -> string
-            if (writeTemporal(out, o)) return;
-
-            // string-based types -> string
-            if (writeStringBasedType(out, o)) return;
 
             // record / bean
             if (o instanceof Record) {
@@ -464,10 +465,10 @@ public final class Json {
             out.append(']');
         }
 
-        void writeCollection(StringBuilder out, Collection<?> coll) {
+        void writeCollection(StringBuilder out, Iterable<?> iter) {
             out.append('[');
             boolean first = true;
-            for (Object e : coll) {
+            for (Object e : iter) {
                 if (!first) out.append(',');
                 first = false;
                 write(out, e);
@@ -758,7 +759,7 @@ public final class Json {
             }
 
             // 3.2 Collection: if non-array provided, wrap single element
-            if (Collection.class.isAssignableFrom(raw)) {
+            if (Iterable.class.isAssignableFrom(raw)) {
                 JsonArray ja =
                         (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
                 return (T) toCollection(ja, type);
@@ -1087,7 +1088,7 @@ public final class Json {
 
         @SuppressWarnings("unchecked")
         static Collection<Object> createCollection(Class<?> raw, int size) {
-            if (typeBetween(raw, ArrayList.class, Collection.class)) return new ArrayList<>(size);
+            if (typeBetween(raw, ArrayList.class, Iterable.class)) return new ArrayList<>(size);
             if (typeBetween(raw, LinkedList.class, null)) return new LinkedList<>();
             if (typeBetween(raw, LinkedHashSet.class, null)) return new LinkedHashSet<>(size);
             if (typeBetween(raw, TreeSet.class, null)) return new TreeSet<>();
@@ -1222,7 +1223,7 @@ public final class Json {
                         switch (this.deserializers == null ? 0 : this.deserializers.size()) {
                             case 0 -> Collections.emptyList();
                             case 1 -> Collections.singletonList(this.deserializers.get(0));
-                            default -> Collections.unmodifiableList(new ArrayList<Deserializer>(this.deserializers));
+                            default -> List.copyOf(this.deserializers);
                         };
                 return new Parser(deserializers);
             }

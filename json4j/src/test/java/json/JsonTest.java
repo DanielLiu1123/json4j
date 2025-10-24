@@ -306,7 +306,7 @@ class JsonTest {
 
                     // Collection (if non-array provided, wrap single element)
                     {"[]", new Json.Type<List<RecordPerson>>() {}, List.of()},
-                    {"[1,2,3]", new Json.Type<List<Integer>>() {}, List.of(1, 2, 3)},
+                    {"[1,2,3]", new Json.Type<Iterable<Integer>>() {}, List.of(1, 2, 3)},
                     {"[[1,2],[3,4]]", new Json.Type<List<List<Integer>>>() {}, List.of(List.of(1, 2), List.of(3, 4))},
                     {"[{\"name\":\"Alice\",\"age\":30},{\"name\":\"Bob\",\"age\":25,\"birthDate\":\"2025-10-10\"}]", new Json.Type<List<RecordPerson>>() {}, List.of(new RecordPerson("Alice", 30, null), new RecordPerson("Bob", 25, LocalDate.parse("2025-10-10")))},
                     // Set types
