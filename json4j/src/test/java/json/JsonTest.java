@@ -157,7 +157,7 @@ class JsonTest {
                     {TimeZone.getTimeZone("Asia/Shanghai"), "\"Asia/Shanghai\""},
                     // java.net types
                     {URI.create("https://example.com"), "\"https://example.com\""},
-                    {new URL("https://example.com"), "\"https://example.com\""},
+                    {URI.create("https://example.com").toURL(), "\"https://example.com\""},
                     // java.util.regex.Pattern
                     {Pattern.compile("[a-z]+"), "\"[a-z]+\""},
 
@@ -290,7 +290,7 @@ class JsonTest {
                     {"\"Asia/Shanghai\"", new Json.Type<TimeZone>() {}, TimeZone.getTimeZone("Asia/Shanghai")},
                     // java.net types
                     {"\"https://example.com\"", new Json.Type<URI>() {}, URI.create("https://example.com")},
-                    {"\"https://example.com\"", new Json.Type<URL>() {}, new URL("https://example.com")},
+                    {"\"https://example.com\"", new Json.Type<URL>() {}, URI.create("https://example.com").toURL()},
                     // java.util.regex.Pattern - removed due to Pattern not implementing equals()
 
                     // Optional

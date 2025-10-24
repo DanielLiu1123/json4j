@@ -909,7 +909,7 @@ public final class Json {
                 if (raw == SimpleTimeZone.class) return SimpleTimeZone.getTimeZone(ZoneId.of(value));
                 if (raw == TimeZone.class) return TimeZone.getTimeZone(value);
                 if (raw == URI.class) return URI.create(value);
-                if (raw == URL.class) return new URL(value);
+                if (raw == URL.class) return URI.create(value).toURL();
                 if (raw == Path.class) return Path.of(value);
                 if (raw == Pattern.class) return Pattern.compile(value);
             } catch (java.lang.Exception e) {
