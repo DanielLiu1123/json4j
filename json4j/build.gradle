@@ -1,9 +1,6 @@
 description = "Minimal, standard-first JSON library"
 
 dependencies {
-    // add lombok dependency
-    compileOnly("org.projectlombok:lombok:+")
-    annotationProcessor("org.projectlombok:lombok:+")
     optional("com.google.protobuf:protobuf-java:${protobufVersion}")
     testImplementation("com.google.protobuf:protobuf-java:${protobufVersion}")
     testImplementation("com.google.protobuf:protobuf-java-util:${protobufVersion}")

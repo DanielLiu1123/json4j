@@ -1,7 +1,6 @@
 package json;
 
 import java.beans.Introspector;
-import java.io.Writer;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.GenericArrayType;
@@ -33,6 +32,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Currency;
 import java.util.Date;
 import java.util.EnumMap;
@@ -72,8 +72,6 @@ import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
-import lombok.Builder;
-import lombok.Singular;
 
 /**
  * Minimal, standard-first JSON writer and parser.
@@ -173,11 +171,17 @@ public final class Json {
     // Writer
     // ============================================================
 
-    @Builder(toBuilder = true)
     public static final class Writer {
 
-        @Singular("serializer")
         private final List<Serializer> serializers;
+
+        Writer(List<Serializer> serializers) {
+            this.serializers = serializers;
+        }
+
+        public static WriterBuilder builder() {
+            return new WriterBuilder();
+        }
 
         /**
          * Serialize any Java object to a JSON string.
@@ -574,24 +578,76 @@ public final class Json {
                 }
             }
         }
+
+        public WriterBuilder toBuilder() {
+            final WriterBuilder builder = new WriterBuilder();
+            if (this.serializers != null) builder.serializers(this.serializers);
+            return builder;
+        }
+
+        public static class WriterBuilder {
+            private ArrayList<Serializer> serializers;
+
+            WriterBuilder() {}
+
+            public WriterBuilder serializer(Serializer serializer) {
+                if (this.serializers == null) this.serializers = new ArrayList<Serializer>();
+                this.serializers.add(serializer);
+                return this;
+            }
+
+            public WriterBuilder serializers(Collection<? extends Serializer> serializers) {
+                if (serializers == null) {
+                    throw new NullPointerException("serializers cannot be null");
+                }
+                if (this.serializers == null) this.serializers = new ArrayList<Serializer>();
+                this.serializers.addAll(serializers);
+                return this;
+            }
+
+            public WriterBuilder clearSerializers() {
+                if (this.serializers != null) this.serializers.clear();
+                return this;
+            }
+
+            public Writer build() {
+                List<Serializer> serializers =
+                        switch (this.serializers == null ? 0 : this.serializers.size()) {
+                            case 0 -> Collections.emptyList();
+                            case 1 -> Collections.singletonList(this.serializers.get(0));
+                            default -> List.copyOf(this.serializers);
+                        };
+                return new Writer(serializers);
+            }
+
+            public String toString() {
+                return "Json.Writer.WriterBuilder(serializers=" + this.serializers + ")";
+            }
+        }
     }
 
     // ============================================================
     // Parser
     // ============================================================
 
-    @Builder(toBuilder = true)
     public static final class Parser {
 
-        @Singular("deserializer")
         private final List<Deserializer> deserializers;
+
+        Parser(List<Deserializer> deserializers) {
+            this.deserializers = deserializers;
+        }
+
+        public static ParserBuilder builder() {
+            return new ParserBuilder();
+        }
 
         /**
          * Parse JSON string into an instance of the target class.
          *
-         * @param json the JSON string
+         * @param json  the JSON string
          * @param clazz the target class
-         * @param <T> the target type
+         * @param <T>   the target type
          * @return the parsed instance
          */
         public <T> T parse(String json, Class<T> clazz) {
@@ -603,7 +659,7 @@ public final class Json {
          *
          * @param json the JSON string
          * @param type the target type token
-         * @param <T> the target type
+         * @param <T>  the target type
          * @return the parsed instance
          */
         public <T> T parse(String json, Type<T> type) {
@@ -615,8 +671,8 @@ public final class Json {
          * Parse JSON value into an instance of the target type.
          *
          * @param jsonValue the JSON value
-         * @param type the target type
-         * @param <T> the target type
+         * @param type      the target type
+         * @param <T>       the target type
          * @return the parsed instance
          */
         @SuppressWarnings("unchecked")
@@ -1128,6 +1184,52 @@ public final class Json {
             if (raw == JsonValue.class) return jv;
             throw new ConversionException(
                     "Cannot convert " + jv.getClass().getSimpleName() + " to " + raw.getSimpleName());
+        }
+
+        public ParserBuilder toBuilder() {
+            final ParserBuilder builder = new ParserBuilder();
+            if (this.deserializers != null) builder.deserializers(this.deserializers);
+            return builder;
+        }
+
+        public static class ParserBuilder {
+            private ArrayList<Deserializer> deserializers;
+
+            ParserBuilder() {}
+
+            public ParserBuilder deserializer(Deserializer deserializer) {
+                if (this.deserializers == null) this.deserializers = new ArrayList<Deserializer>();
+                this.deserializers.add(deserializer);
+                return this;
+            }
+
+            public ParserBuilder deserializers(Collection<? extends Deserializer> deserializers) {
+                if (deserializers == null) {
+                    throw new NullPointerException("deserializers cannot be null");
+                }
+                if (this.deserializers == null) this.deserializers = new ArrayList<Deserializer>();
+                this.deserializers.addAll(deserializers);
+                return this;
+            }
+
+            public ParserBuilder clearDeserializers() {
+                if (this.deserializers != null) this.deserializers.clear();
+                return this;
+            }
+
+            public Parser build() {
+                List<Deserializer> deserializers =
+                        switch (this.deserializers == null ? 0 : this.deserializers.size()) {
+                            case 0 -> Collections.emptyList();
+                            case 1 -> Collections.singletonList(this.deserializers.get(0));
+                            default -> Collections.unmodifiableList(new ArrayList<Deserializer>(this.deserializers));
+                        };
+                return new Parser(deserializers);
+            }
+
+            public String toString() {
+                return "Json.Parser.ParserBuilder(deserializers=" + this.deserializers + ")";
+            }
         }
     }
 
