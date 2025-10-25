@@ -196,85 +196,120 @@ public final class Json {
         }
 
         void write(StringBuilder out, Object o) {
+            // Handle null
             if (o == null) {
                 out.append("null");
                 return;
             }
+
+            // Handle JsonValue AST
             if (o instanceof JsonValue jv) {
                 writeJsonValue(out, jv);
                 return;
             }
+
+            // Handle custom serializers
             for (var serializer : serializers) {
                 if (serializer.canSerialize(o)) {
                     out.append(serializer.serialize(this, o));
                     return;
                 }
             }
-            if (o instanceof CharSequence s) {
-                writeString(out, s.toString());
-                return;
-            }
-            if (o instanceof Character c) {
-                writeString(out, String.valueOf(c));
-                return;
-            }
-            if (o instanceof Boolean b) {
-                out.append(b ? "true" : "false");
-                return;
-            }
-            if (o instanceof Number n) {
-                writeNumber(out, n);
-                return;
-            }
-            if (o instanceof Optional<?> optional) {
-                if (optional.isEmpty()) out.append("null");
-                else write(out, optional.get());
-                return;
-            }
-            // AtomicBoolean: extract the value and serialize
-            if (o instanceof AtomicBoolean ab) {
-                out.append(ab.get() ? "true" : "false");
-                return;
-            }
 
-            // temporal types -> string
-            if (writeTemporal(out, o)) return;
+            // Handle primitive and wrapper types
+            if (writePrimitiveType(out, o)) return;
 
-            // string-based types -> string
-            if (writeStringBasedType(out, o)) return;
-
-            // AtomicReference: extract the value and serialize
-            if (o instanceof AtomicReference<?> ar) {
-                write(out, ar.get());
-                return;
-            }
-            if (o.getClass().isArray()) {
-                writeArray(out, o);
-                return;
-            }
-            if (o instanceof Iterable<?> coll) {
-                writeCollection(out, coll);
-                return;
-            }
-            if (o instanceof BaseStream<?, ?> stream) {
-                writeStream(out, stream);
-                return;
-            }
-            if (o instanceof Map<?, ?> m) {
-                writeMap(out, m);
-                return;
-            }
+            // Handle enums
             if (o instanceof Enum<?> e) {
                 writeString(out, e.name());
                 return;
             }
 
-            // record / bean
+            // Handle temporal types (Date, Instant, LocalDate, etc.)
+            if (writeTemporal(out, o)) return;
+
+            // Handle string-based types (UUID, URI, Path, etc.)
+            if (writeStringBasedType(out, o)) return;
+
+            // Handle atomic types
+            if (writeAtomicType(out, o)) return;
+
+            // Handle collections and arrays
+            if (writeCollectionType(out, o)) return;
+
+            // Handle maps
+            if (o instanceof Map<?, ?> m) {
+                writeMap(out, m);
+                return;
+            }
+
+            // Handle records and beans
             if (o instanceof Record) {
                 writeRecord(out, o);
                 return;
             }
             writeBean(out, o);
+        }
+
+        private boolean writePrimitiveType(StringBuilder out, Object o) {
+            if (o instanceof CharSequence s) {
+                writeString(out, s.toString());
+                return true;
+            }
+            if (o instanceof Character c) {
+                writeString(out, String.valueOf(c));
+                return true;
+            }
+            if (o instanceof Boolean b) {
+                out.append(b ? "true" : "false");
+                return true;
+            }
+            if (o instanceof Number n) {
+                writeNumber(out, n);
+                return true;
+            }
+            if (o instanceof Optional<?> optional) {
+                if (optional.isEmpty()) out.append("null");
+                else write(out, optional.get());
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * Writes atomic types (AtomicBoolean, AtomicReference, etc.).
+         * @return true if the type was handled, false otherwise
+         */
+        private boolean writeAtomicType(StringBuilder out, Object o) {
+            if (o instanceof AtomicBoolean ab) {
+                out.append(ab.get() ? "true" : "false");
+                return true;
+            }
+            if (o instanceof AtomicReference<?> ar) {
+                write(out, ar.get());
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * Writes collection types (arrays, lists, streams, etc.).
+         * @return true if the type was handled, false otherwise
+         */
+        private boolean writeCollectionType(StringBuilder out, Object o) {
+            if (o.getClass().isArray()) {
+                writeArray(out, o);
+                return true;
+            }
+            if (o instanceof Iterable<?> coll) {
+                writeCollection(out, coll);
+                return true;
+            }
+            if (o instanceof BaseStream<?, ?> stream) {
+                writeStream(out, stream);
+                return true;
+            }
+            return false;
         }
 
         boolean writeTemporal(StringBuilder out, Object o) {
@@ -495,18 +530,15 @@ public final class Json {
             for (var c : r.getClass().getRecordComponents()) {
                 try {
                     var readMethod = c.getAccessor();
-                    Object v = readMethod.invoke(r);
-                    if (readMethod.getReturnType() == Optional.class) {
-                        if (v == null) continue; // treat null Optional as empty
-                        var optional = (Optional<?>) v;
-                        if (optional.isEmpty()) continue;
-                        v = optional.get();
-                    }
+                    Object value = readMethod.invoke(r);
+                    Object extractedValue = extractOptionalValue(value, readMethod.getReturnType());
+                    if (extractedValue == SKIP_FIELD) continue; // skip empty Optional
+
                     if (!first) out.append(',');
                     first = false;
                     writeString(out, c.getName());
                     out.append(':');
-                    write(out, v);
+                    write(out, extractedValue);
                 } catch (java.lang.Exception e) {
                     throw new WriteException(
                             "Failed to access record component '" + c.getName() + "' of type "
@@ -527,18 +559,15 @@ public final class Json {
                     var read = pd.getReadMethod();
                     if (read == null) continue;
                     try {
-                        Object v = read.invoke(bean);
-                        if (read.getReturnType() == Optional.class) {
-                            if (v == null) continue; // treat null Optional as empty
-                            var optional = (Optional<?>) v;
-                            if (optional.isEmpty()) continue;
-                            v = optional.get();
-                        }
+                        Object value = read.invoke(bean);
+                        Object extractedValue = extractOptionalValue(value, read.getReturnType());
+                        if (extractedValue == SKIP_FIELD) continue; // skip empty Optional
+
                         if (!first) out.append(',');
                         first = false;
                         writeString(out, pd.getName());
                         out.append(':');
-                        write(out, v);
+                        write(out, extractedValue);
                     } catch (java.lang.Exception e) {
                         throw new WriteException(
                                 "Failed to read bean property '" + pd.getName() + "' of type "
@@ -568,16 +597,38 @@ public final class Json {
                     case '\t' -> out.append("\\t");
                     default -> {
                         if (c < 0x20) {
-                            out.append("\\u");
-                            String hex = Integer.toHexString(c);
-                            for (int k = hex.length(); k < 4; k++) out.append('0');
-                            out.append(hex);
+                            appendUnicodeEscape(out, c);
                         } else {
                             out.append(c);
                         }
                     }
                 }
             }
+        }
+
+        /**
+         * Sentinel value to indicate that an Optional field should be skipped during serialization.
+         */
+        private static final Object SKIP_FIELD = new Object();
+
+        private static Object extractOptionalValue(Object value, Class<?> returnType) {
+            if (returnType != Optional.class) {
+                return value;
+            }
+            if (value == null) {
+                return SKIP_FIELD; // treat null Optional as empty
+            }
+            var optional = (Optional<?>) value;
+            return optional.isEmpty() ? SKIP_FIELD : optional.get();
+        }
+
+        private static void appendUnicodeEscape(StringBuilder out, char c) {
+            out.append("\\u");
+            String hex = Integer.toHexString(c);
+            for (int k = hex.length(); k < 4; k++) {
+                out.append('0');
+            }
+            out.append(hex);
         }
 
         public WriterBuilder toBuilder() {
@@ -682,109 +733,120 @@ public final class Json {
             type = canonicalize(type);
             Class<?> raw = raw(type);
 
-            // 0) Trivial/dynamic targets
-            if (raw == Object.class) return (T) fromUntyped(jsonValue); // best-effort untyped
-            if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jsonValue, raw); // return AST as-is
+            // Handle trivial/dynamic targets
+            if (raw == Object.class) return (T) fromUntyped(jsonValue);
+            if (JsonValue.class.isAssignableFrom(raw)) return (T) asJsonValue(jsonValue, raw);
 
-            // Custom codec
+            // Handle custom deserializers
             for (var deserializer : deserializers) {
                 if (deserializer.canDeserialize(jsonValue, type)) {
                     return (T) deserializer.deserialize(this, jsonValue, type);
                 }
             }
 
-            // 1) Null handling
+            // Handle null
             if (jsonValue instanceof JsonNull) return (T) toNull(raw);
 
-            // 2) Scalar targets (LOOSE)
+            // Handle scalar types
+            T scalarResult = parseScalarType(jsonValue, type, raw);
+            if (scalarResult != null) return scalarResult;
 
-            // 2.1 boolean: accept JsonBoolean, "true"/"false", "1"/"0", numeric 1/0
+            // Handle structured types (arrays, collections, streams)
+            T structuredResult = parseStructuredType(jsonValue, type, raw);
+            if (structuredResult != null) return structuredResult;
+
+            // Handle maps, records, and beans (require JsonObject)
+            JsonObject jo = expectObject(jsonValue);
+
+            if (Map.class.isAssignableFrom(raw)) {
+                return (T) toMap(jo, type);
+            }
+            if (raw.isRecord()) {
+                return (T) toRecord(jo, raw);
+            }
+            return (T) toBean(jo, raw);
+        }
+
+        @SuppressWarnings("unchecked")
+        private <T> T parseScalarType(JsonValue jsonValue, java.lang.reflect.Type type, Class<?> raw) {
+            // Boolean types
             if (raw == boolean.class || raw == Boolean.class || raw == AtomicBoolean.class) {
                 return (T) toBoolean(jsonValue, raw);
             }
 
-            // 2.2 number: accept JsonNumber, numeric strings, and booleans (true->1, false->0)
-            // AtomicInteger and AtomicLong are Number subclasses, so they're handled here
+            // Numeric types (including AtomicInteger and AtomicLong)
             if (Number.class.isAssignableFrom(raw) || (raw.isPrimitive() && raw != char.class)) {
                 return (T) toNumber(jsonValue, raw);
             }
 
-            // 2.3 String/CharSequence: stringify any JsonValue (numbers/booleans become their textual form)
+            // String types
             if (raw == String.class || raw == CharSequence.class) {
-                return (T) Json.toString(jsonValue); // json string should have quote, Java String should not have quote
+                return (T) Json.toString(jsonValue);
             }
 
-            // 2.4 char/Character: accept 1-char string (or stringify first)
+            // Character types
             if (raw == char.class || raw == Character.class) {
                 String s = Json.toString(jsonValue);
-                if (s.length() != 1)
+                if (s.length() != 1) {
                     throw new ConversionException(
                             "Cannot convert string to char: expected length 1, got " + s.length() + " (\"" + s + "\")");
+                }
                 return (T) Character.valueOf(s.charAt(0));
             }
 
-            // 2.5 enum: accept name (case-insensitive) or ordinal number (string/number)
+            // Enum types
             if (raw.isEnum()) {
                 return (T) toEnum(jsonValue, raw);
             }
 
-            // 2.6 temporal: accept ISO-8601 string or epoch millis (number/string)
+            // Temporal types (Date, Instant, LocalDate, etc.)
             if (isTemporal(raw)) {
                 return (T) toTemporal(jsonValue, raw);
             }
 
-            // 2.7 string-based types, like UUID, URI...
+            // String-based types (UUID, URI, Path, etc.)
             if (isStringBasedType(raw)) {
                 return (T) toStringBasedType(jsonValue, raw);
             }
 
-            // 2.8 optional: wrap the inner type
+            // Optional types
             if (raw == Optional.class) {
                 return (T) toOptional(jsonValue, type);
             }
 
-            // 2.9 AtomicReference: wrap the inner type
+            // AtomicReference types
             if (raw == AtomicReference.class) {
                 return (T) new AtomicReference<>(
                         parseJsonValue(jsonValue, ((ParameterizedType) type).getActualTypeArguments()[0]));
             }
 
-            // 3) Structured targets (LOOSE)
+            return null; // Not a scalar type
+        }
 
-            // 3.1 arrays: if non-array provided, wrap single element
+        @SuppressWarnings("unchecked")
+        private <T> T parseStructuredType(JsonValue jsonValue, java.lang.reflect.Type type, Class<?> raw) {
+            // Arrays: wrap single element if needed
             if (raw.isArray()) {
                 JsonArray ja =
                         (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
                 return (T) toArray(ja, raw.getComponentType());
             }
 
-            // 3.2 Collection: if non-array provided, wrap single element
+            // Collections: wrap single element if needed
             if (Iterable.class.isAssignableFrom(raw)) {
                 JsonArray ja =
                         (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
                 return (T) toCollection(ja, type);
             }
 
-            // 3.3 Stream
+            // Streams: wrap single element if needed
             if (BaseStream.class.isAssignableFrom(raw)) {
                 JsonArray ja =
                         (jsonValue instanceof JsonArray) ? (JsonArray) jsonValue : new JsonArray(List.of(jsonValue));
                 return (T) toStream(ja, type);
             }
 
-            // Must JsonObject here!
-            JsonObject jo = expectObject(jsonValue);
-
-            // 3.4 Map
-            if (Map.class.isAssignableFrom(raw)) {
-                return (T) toMap(jo, type);
-            }
-
-            // 3.5 Record
-            if (raw.isRecord()) return (T) toRecord(jo, raw);
-
-            // 3.6 Java bean
-            return (T) toBean(jo, raw);
+            return null; // Not a structured type
         }
 
         static JsonValue parseJsonValue(Lexer lexer) {
@@ -1572,14 +1634,14 @@ public final class Json {
         }
 
         private int readHex4() {
-            int cp = 0;
-            for (int k = 0; k < 4; k++) {
+            int codePoint = 0;
+            for (int i = 0; i < 4; i++) {
                 if (eof()) error("Unexpected end of input in \\u escape sequence");
-                int v = hexVal(consume());
-                if (v < 0) error("Invalid hexadecimal digit in \\u escape sequence");
-                cp = (cp << 4) | v;
+                int hexValue = hexVal(consume());
+                if (hexValue < 0) error("Invalid hexadecimal digit in \\u escape sequence");
+                codePoint = (codePoint << 4) | hexValue;
             }
-            return cp;
+            return codePoint;
         }
 
         private static int hexVal(char c) {
