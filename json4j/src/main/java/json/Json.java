@@ -479,12 +479,8 @@ public final class Json {
         }
 
         void writeNumber(StringBuilder out, Number n) {
-            // Serialize types that may exceed JavaScript safe integer range as strings
-            // - BigInteger and BigDecimal: arbitrary precision
-            // - Long/long: range -2^63 to 2^63-1, exceeds JS safe range ±2^53-1
-            // - AtomicLong: same range as long
-            if (n instanceof BigDecimal || n instanceof BigInteger || n instanceof Long
-                    || n instanceof java.util.concurrent.atomic.AtomicLong) {
+            // "big numbers" are written as strings
+            if (n instanceof Long || n instanceof BigDecimal || n instanceof BigInteger || n instanceof AtomicLong) {
                 writeString(out, n.toString());
                 return;
             }
