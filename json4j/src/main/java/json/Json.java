@@ -129,8 +129,8 @@ public final class Json {
      * @return parsed instance (maybe {@code null} if json is "null")
      */
     public static <T> T parse(String json, Type<T> type) {
-        Objects.requireNonNull(json, "json");
-        Objects.requireNonNull(type, "type");
+        if (json == null) throw new IllegalArgumentException("json cannot be null");
+        if (type == null) throw new IllegalArgumentException("type cannot be null");
         return defaultParser.parse(json, type);
     }
 
@@ -145,7 +145,8 @@ public final class Json {
      * @return parsed instance (maybe {@code null} if json is "null")
      */
     public static <T> T parse(String json, Class<T> clazz) {
-        Objects.requireNonNull(clazz, "clazz");
+        if (json == null) throw new IllegalArgumentException("json cannot be null");
+        if (clazz == null) throw new IllegalArgumentException("clazz cannot be null");
         return parse(json, Type.of(clazz));
     }
 
@@ -704,6 +705,8 @@ public final class Json {
          * @return the parsed instance
          */
         public <T> T parse(String json, Class<T> clazz) {
+            if (json == null) throw new IllegalArgumentException("json cannot be null");
+            if (clazz == null) throw new IllegalArgumentException("clazz cannot be null");
             return parse(json, Type.of(clazz));
         }
 
@@ -716,6 +719,8 @@ public final class Json {
          * @return the parsed instance
          */
         public <T> T parse(String json, Type<T> type) {
+            if (json == null) throw new IllegalArgumentException("json cannot be null");
+            if (type == null) throw new IllegalArgumentException("type cannot be null");
             var jv = parseJsonValue(new Lexer(json));
             return parseJsonValue(jv, canonicalize(type.getType()));
         }
@@ -730,6 +735,9 @@ public final class Json {
          */
         @SuppressWarnings("unchecked")
         public <T> T parseJsonValue(JsonValue jsonValue, java.lang.reflect.Type type) {
+            if (jsonValue == null) throw new IllegalArgumentException("jsonValue cannot be null");
+            if (type == null) throw new IllegalArgumentException("type cannot be null");
+
             // Normalize reflective type, obtain raw class
             type = canonicalize(type);
             Class<?> raw = raw(type);
@@ -1497,7 +1505,8 @@ public final class Json {
         private String stringValue, numberLexeme;
 
         Lexer(String s) {
-            this.s = Objects.requireNonNull(s);
+            if (s == null) throw new IllegalArgumentException("Input string cannot be null");
+            this.s = s;
             advance();
         }
 
