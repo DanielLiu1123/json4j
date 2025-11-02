@@ -480,7 +480,7 @@ public final class Json {
 
         void writeNumber(StringBuilder out, Number n) {
             if (n instanceof BigDecimal || n instanceof BigInteger) {
-                out.append(n);
+                writeString(out, n.toString());
                 return;
             }
             // Avoid NaN/Infinity (not valid in JSON)
