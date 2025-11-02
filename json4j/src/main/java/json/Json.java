@@ -479,6 +479,7 @@ public final class Json {
         }
 
         void writeNumber(StringBuilder out, Number n) {
+            // Always serialize BigInteger and BigDecimal as strings
             if (n instanceof BigDecimal || n instanceof BigInteger) {
                 writeString(out, n.toString());
                 return;
@@ -487,6 +488,13 @@ public final class Json {
             double d = n.doubleValue();
             if (Double.isNaN(d) || Double.isInfinite(d))
                 throw new WriteException("Cannot serialize NaN or Infinity as JSON number: " + n);
+            // Serialize as string if outside JavaScript safe integer range
+            // JavaScript Number.MAX_SAFE_INTEGER = 2^53 - 1 = 9007199254740991
+            long longValue = n.longValue();
+            if (longValue == d && (longValue > 9007199254740991L || longValue < -9007199254740991L)) {
+                writeString(out, n.toString());
+                return;
+            }
             out.append(n);
         }
 
