@@ -479,8 +479,9 @@ public final class Json {
         }
 
         void writeNumber(StringBuilder out, Number n) {
-            if (n instanceof BigDecimal || n instanceof BigInteger) {
-                out.append(n);
+            // "big numbers" are written as strings
+            if (n instanceof Long || n instanceof BigDecimal || n instanceof BigInteger || n instanceof AtomicLong) {
+                writeString(out, n.toString());
                 return;
             }
             // Avoid NaN/Infinity (not valid in JSON)

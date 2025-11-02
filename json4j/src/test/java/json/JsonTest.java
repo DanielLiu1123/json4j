@@ -92,6 +92,9 @@ class JsonTest {
 
                     // Number
                     {42, "42"},
+                    {42L, "\"42\""},
+                    {BigDecimal.valueOf(1), "\"1\""},
+                    {BigInteger.valueOf(1), "\"1\""},
                     {3.14, "3.14"},
                     {-0.01, "-0.01"},
 
@@ -102,7 +105,7 @@ class JsonTest {
 
                     // Atomic types
                     {new AtomicInteger(42), "42"},
-                    {new AtomicLong(10000000000L), "10000000000"},
+                    {new AtomicLong(10000000000L), "\"10000000000\""},
                     {new AtomicBoolean(true), "true"},
                     {new AtomicReference<>("hello"), "\"hello\""},
                     {new AtomicReference<>(null), "null"},
