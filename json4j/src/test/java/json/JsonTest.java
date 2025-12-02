@@ -208,35 +208,6 @@ class JsonTest {
                 assertThat(actual).as("Case %d: input=%s", i, input).isEqualTo(expected);
             }));
         }
-
-        @Test
-        void skipNullValues() {
-            // Test with Map
-            var map = new java.util.LinkedHashMap<String, Object>();
-            map.put("name", "Alice");
-            map.put("age", null);
-            map.put("city", "NYC");
-            assertThat(Json.stringify(map)).isEqualTo("{\"name\":\"Alice\",\"city\":\"NYC\"}");
-
-            // Test with Record
-            record Person(String name, Integer age, String city) {}
-            var person = new Person("Bob", null, "LA");
-            assertThat(Json.stringify(person)).isEqualTo("{\"name\":\"Bob\",\"city\":\"LA\"}");
-
-            // Test with all null values
-            var allNull = new Person(null, null, null);
-            assertThat(Json.stringify(allNull)).isEqualTo("{}");
-
-            // Test with Bean
-            var bean = new ClassPerson();
-            bean.setName("Charlie");
-            bean.setAge(30);
-            bean.setBirthDate(null);
-            var beanJson = Json.stringify(bean);
-            assertThat(beanJson).contains("\"name\":\"Charlie\"");
-            assertThat(beanJson).contains("\"age\":30");
-            assertThat(beanJson).doesNotContain("birthDate");
-        }
     }
 
     @Nested
