@@ -118,7 +118,7 @@ class JsonTest {
                     {new TreeSet<>(List.of(3, 1, 2)), "[1,2,3]"},
 
                     // Stream
-                    {Stream.of(Optional.empty(), Optional.of(1), Optional.of("str"), Optional.of(true), Optional.of(new RecordPerson("Alice", 30, null))), "[null,1,\"str\",true,{\"name\":\"Alice\",\"age\":30,\"birthDate\":null}]"},
+                    {Stream.of(Optional.empty(), Optional.of(1), Optional.of("str"), Optional.of(true), Optional.of(new RecordPerson("Alice", 30, null))), "[null,1,\"str\",true,{\"name\":\"Alice\",\"age\":30}]"},
 
                     // Map
                     {Map.of("key", "value"), "{\"key\":\"value\"}"},

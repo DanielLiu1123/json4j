@@ -517,11 +517,13 @@ public final class Json {
             out.append('{');
             boolean first = true;
             for (var en : map.entrySet()) {
+                Object value = en.getValue();
+                if (value == null) continue; // skip null values
                 if (!first) out.append(',');
                 first = false;
                 writeString(out, String.valueOf(en.getKey())); // JSON keys must be strings
                 out.append(':');
-                write(out, en.getValue());
+                write(out, value);
             }
             out.append('}');
         }
@@ -535,6 +537,7 @@ public final class Json {
                     Object value = readMethod.invoke(r);
                     Object extractedValue = extractOptionalValue(value, readMethod.getReturnType());
                     if (extractedValue == SKIP_FIELD) continue; // skip empty Optional
+                    if (extractedValue == null) continue; // skip null values
 
                     if (!first) out.append(',');
                     first = false;
@@ -564,6 +567,7 @@ public final class Json {
                         Object value = read.invoke(bean);
                         Object extractedValue = extractOptionalValue(value, read.getReturnType());
                         if (extractedValue == SKIP_FIELD) continue; // skip empty Optional
+                        if (extractedValue == null) continue; // skip null values
 
                         if (!first) out.append(',');
                         first = false;
