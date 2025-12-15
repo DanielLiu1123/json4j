@@ -1,7 +1,7 @@
 plugins {
     id "com.diffplug.spotless" version "${spotlessVersion}" apply false
     id "com.google.protobuf" version "+" apply false
-    id "io.github.danielliu1123.deployer" version "0.3.0"
+    id "io.github.danielliu1123.deployer" version "${deployerPluginVersion}"
 }
 
 deploy {
