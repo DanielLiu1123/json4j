@@ -1,7 +1,15 @@
 plugins {
     id "com.diffplug.spotless" version "${spotlessVersion}" apply false
-    id "org.jreleaser" version "${jReleaserVersion}" apply false
     id "com.google.protobuf" version "+" apply false
+    id "io.github.danielliu1123.deployer" version "0.3.0"
+}
+
+deploy {
+    // dirs to upload, they will all be packaged into one bundle
+    dirs = subprojects.collect { e -> e.layout.buildDirectory.dir("repo").get().getAsFile() }
+    username = System.getenv("MAVENCENTRAL_USERNAME")
+    password = System.getenv("MAVENCENTRAL_PASSWORD")
+    publishingType = io.github.danielliu1123.deployer.PublishingType.AUTOMATIC
 }
 
 subprojects {
@@ -61,5 +69,3 @@ subprojects {
         }
     }
 }
-
-apply from: "${rootDir}/gradle/jreleaser.gradle"

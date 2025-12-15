@@ -376,8 +376,8 @@ public final class ProtobufCodec implements Json.Serializer, Json.Deserializer {
             case DOUBLE -> new Json.JsonNumber((Double) value);
             case BOOLEAN -> new Json.JsonBoolean((Boolean) value);
             case STRING -> new Json.JsonString((String) value);
-            case BYTE_STRING -> new Json.JsonString(
-                    Base64.getEncoder().encodeToString(((ByteString) value).toByteArray()));
+            case BYTE_STRING ->
+                new Json.JsonString(Base64.getEncoder().encodeToString(((ByteString) value).toByteArray()));
             case ENUM -> new Json.JsonString(((Enum<?>) value).name());
             case MESSAGE -> messageToJsonValue((MessageOrBuilder) value);
         };
@@ -963,7 +963,7 @@ public final class ProtobufCodec implements Json.Serializer, Json.Deserializer {
                         int stringIndex = dis.readUnsignedShort();
                         pool[i] = new ConstantPoolEntry(tag, stringIndex);
                     } // 9
-                        // 10
+                    // 10
                     case CONSTANT_Fieldref, CONSTANT_Methodref, CONSTANT_InterfaceMethodref -> {
                         int classIndex = dis.readUnsignedShort();
                         int nameAndTypeIndex = dis.readUnsignedShort();

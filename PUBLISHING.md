@@ -19,7 +19,6 @@
     ```shell
     gh secret set MAVENCENTRAL_USERNAME --body "your-username"
     gh secret set MAVENCENTRAL_PASSWORD --body "your-password"
-    gh secret set GPG_PUBLIC_KEY --body < /path/to/public.gpg
     gh secret set GPG_SECRET_KEY --body < /path/to/secret.gpg
     gh secret set GPG_PASSPHRASE --body "your-gpg-passphrase"
     ```
@@ -29,21 +28,19 @@
 ```shell
 export MAVENCENTRAL_USERNAME="your-username"
 export MAVENCENTRAL_PASSWORD="your-password"
-
-./gradlew publish jreleaserDeploy -Pversion=0.1.0-SNAPSHOT
+./gradlew clean publish -Pversion=1.0.0-SNAPSHOT
 ```
 
-## Publish
+## Publish Release
 
 ```shell
+# Step 1: Stage artifacts and sign
+export GPG_SECRET_KEY="$(cat /path/to/secret.gpg)"
+export GPG_PASSPHRASE="your-gpg-passphrase"
+./gradlew clean publish -Pversion=1.0.0
+
+# Step 2: Upload
 export MAVENCENTRAL_USERNAME="your-username"
 export MAVENCENTRAL_PASSWORD="your-password"
-export GPG_PASSPHRASE="your-gpg-passphrase"
-export GPG_PUBLIC_KEY="$(cat /path/to/public.gpg)"
-export GPG_SECRET_KEY="$(cat /path/to/secret.gpg)"
-
-./gradlew publish jreleaserDeploy -Pversion=0.1.0
+./gradlew deploy
 ```
-
-
-
