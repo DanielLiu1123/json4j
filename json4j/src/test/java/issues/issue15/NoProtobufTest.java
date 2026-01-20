@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Verify this library works correctly when Protobuf is not present in the classpath.
  *
- * @see <a href="https://github.com/danielliu1123/json4j/issues/15">Issue #15</a>
+ * @see <a href="https://github.com/danielliu1123/json4j/issues/15">Issue 15</a>
  */
 class NoProtobufTest {
 
