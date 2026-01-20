@@ -1,10 +1,6 @@
 package json;
 
 import java.beans.Introspector;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.UncheckedIOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.GenericArrayType;
@@ -17,7 +13,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -41,7 +36,6 @@ import java.util.Collections;
 import java.util.Currency;
 import java.util.Date;
 import java.util.EnumMap;
-import java.util.Enumeration;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -52,7 +46,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.ServiceConfigurationError;
+import java.util.ServiceLoader;
 import java.util.SimpleTimeZone;
 import java.util.Spliterators;
 import java.util.Stack;
@@ -82,7 +76,7 @@ import java.util.stream.Stream;
 /**
  * Minimal, standard-first JSON writer and parser.
  *
- * @author Freeman
+ * @author <a href="mailto:llw599502537@gmail.com">Freeman</a>
  */
 public final class Json {
 
@@ -1964,86 +1958,21 @@ public final class Json {
     }
 
     static List<Serializer> loadSerializers() {
-        return loadServices(Serializer.class);
+        var serializers = new ArrayList<Serializer>();
+        for (var e : ServiceLoader.load(Serializer.class)) serializers.add(e);
+        if (isProtobufPresent()) serializers.add(new ProtobufCodec());
+        return serializers;
     }
 
     static List<Deserializer> loadDeserializers() {
-        return loadServices(Deserializer.class);
+        var deserializers = new ArrayList<Deserializer>();
+        for (var e : ServiceLoader.load(Deserializer.class)) deserializers.add(e);
+        if (isProtobufPresent()) deserializers.add(new ProtobufCodec());
+        return deserializers;
     }
 
-    static <T> List<T> loadServices(Class<T> type) {
-        var services = new ArrayList<T>();
-        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-        if (classLoader == null) classLoader = Json.class.getClassLoader();
-        for (var className : loadServiceClassNames(type, classLoader)) {
-            try {
-                services.add(instantiateService(type, classLoader, className));
-            } catch (ServiceConfigurationError e) {
-                if (!isMissingDependency(e)) {
-                    throw e;
-                }
-                // Ignore providers that depend on optional classes not on the classpath.
-            }
-        }
-        return services;
-    }
-
-    static List<String> loadServiceClassNames(Class<?> type, ClassLoader classLoader) {
-        var classNames = new LinkedHashSet<String>();
-        String resourceName = "META-INF/services/" + type.getName();
-        Enumeration<URL> configs;
-        try {
-            configs = classLoader.getResources(resourceName);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        while (configs.hasMoreElements()) {
-            var url = configs.nextElement();
-            try (var reader = new BufferedReader(new InputStreamReader(url.openStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    int comment = line.indexOf('#');
-                    if (comment >= 0) line = line.substring(0, comment);
-                    line = line.trim();
-                    if (!line.isEmpty()) classNames.add(line);
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-        return List.copyOf(classNames);
-    }
-
-    static <T> T instantiateService(Class<T> type, ClassLoader classLoader, String className) {
-        Class<?> raw;
-        try {
-            raw = Class.forName(className, false, classLoader);
-        } catch (ClassNotFoundException | LinkageError e) {
-            throw new ServiceConfigurationError("Provider " + className + " not found", e);
-        }
-        if (!type.isAssignableFrom(raw)) {
-            throw new ServiceConfigurationError("Provider " + className + " not a subtype of " + type.getName());
-        }
-        if (!Modifier.isPublic(raw.getModifiers())) {
-            throw new ServiceConfigurationError("Provider " + className + " is not public");
-        }
-        @SuppressWarnings("unchecked")
-        var impl = (Class<? extends T>) raw;
-        try {
-            Constructor<? extends T> ctor = impl.getConstructor();
-            return ctor.newInstance();
-        } catch (ReflectiveOperationException | LinkageError e) {
-            throw new ServiceConfigurationError("Provider " + className + " could not be instantiated", e);
-        }
-    }
-
-    static boolean isMissingDependency(Throwable error) {
-        for (var t = error; t != null; t = t.getCause()) {
-            if (t instanceof ClassNotFoundException || t instanceof NoClassDefFoundError) {
-                return true;
-            }
-        }
-        return false;
+    static boolean isProtobufPresent() {
+        return isClassPresent("com.google.protobuf.Message");
     }
 
     static Class<?> raw(java.lang.reflect.Type t) {
