@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.SimpleTimeZone;
 import java.util.Spliterators;
@@ -76,7 +77,7 @@ import java.util.stream.Stream;
 /**
  * Minimal, standard-first JSON writer and parser.
  *
- * @author <a href="mailto:llw599502537@gmail.com">Freeman</a>
+ * @author Freeman
  */
 public final class Json {
 
@@ -1958,15 +1959,37 @@ public final class Json {
     }
 
     static List<Serializer> loadSerializers() {
-        var serializers = new ArrayList<Serializer>();
-        for (var e : ServiceLoader.load(Serializer.class)) serializers.add(e);
-        return serializers;
+        return loadServices(Serializer.class);
     }
 
     static List<Deserializer> loadDeserializers() {
-        var deserializers = new ArrayList<Deserializer>();
-        for (var e : ServiceLoader.load(Deserializer.class)) deserializers.add(e);
-        return deserializers;
+        return loadServices(Deserializer.class);
+    }
+
+    static <T> List<T> loadServices(Class<T> type) {
+        var services = new ArrayList<T>();
+        var loader = ServiceLoader.load(type);
+        var it = loader.iterator();
+        while (it.hasNext()) {
+            try {
+                services.add(it.next());
+            } catch (ServiceConfigurationError | NoClassDefFoundError e) {
+                if (!isMissingDependency(e)) {
+                    throw e;
+                }
+                // Ignore providers that depend on optional classes not on the classpath.
+            }
+        }
+        return services;
+    }
+
+    static boolean isMissingDependency(Throwable error) {
+        for (var t = error; t != null; t = t.getCause()) {
+            if (t instanceof ClassNotFoundException || t instanceof NoClassDefFoundError) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static Class<?> raw(java.lang.reflect.Type t) {
