@@ -46,7 +46,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.SimpleTimeZone;
 import java.util.Spliterators;
@@ -1973,7 +1972,7 @@ public final class Json {
         while (it.hasNext()) {
             try {
                 services.add(it.next());
-            } catch (ServiceConfigurationError | NoClassDefFoundError e) {
+            } catch (Throwable e) {
                 if (!isMissingDependency(e)) {
                     throw e;
                 }
