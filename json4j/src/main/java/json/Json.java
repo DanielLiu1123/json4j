@@ -1960,14 +1960,18 @@ public final class Json {
     static List<Serializer> loadSerializers() {
         var serializers = new ArrayList<Serializer>();
         for (var e : ServiceLoader.load(Serializer.class)) serializers.add(e);
-        if (isProtobufPresent()) serializers.add(newInstance("json.ProtobufCodec"));
+        if (isProtobufPresent() && isClassPresent("json.ProtobufCodec")) {
+            serializers.add(newInstance("json.ProtobufCodec"));
+        }
         return serializers;
     }
 
     static List<Deserializer> loadDeserializers() {
         var deserializers = new ArrayList<Deserializer>();
         for (var e : ServiceLoader.load(Deserializer.class)) deserializers.add(e);
-        if (isProtobufPresent()) deserializers.add(newInstance("json.ProtobufCodec"));
+        if (isProtobufPresent() && isClassPresent("json.ProtobufCodec")) {
+            deserializers.add(newInstance("json.ProtobufCodec"));
+        }
         return deserializers;
     }
 
