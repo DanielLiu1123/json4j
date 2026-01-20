@@ -1960,13 +1960,19 @@ public final class Json {
     static List<Serializer> loadSerializers() {
         var serializers = new ArrayList<Serializer>();
         for (var e : ServiceLoader.load(Serializer.class)) serializers.add(e);
+        if (isProtobufPresent()) serializers.add(new ProtobufCodec());
         return serializers;
     }
 
     static List<Deserializer> loadDeserializers() {
         var deserializers = new ArrayList<Deserializer>();
         for (var e : ServiceLoader.load(Deserializer.class)) deserializers.add(e);
+        if (isProtobufPresent()) deserializers.add(new ProtobufCodec());
         return deserializers;
+    }
+
+    static boolean isProtobufPresent() {
+        return isClassPresent("com.google.protobuf.Message");
     }
 
     static Class<?> raw(java.lang.reflect.Type t) {
